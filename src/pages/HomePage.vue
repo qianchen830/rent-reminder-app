@@ -4,22 +4,40 @@ import { getStats, getBills, getContracts, payBill, getProperties } from '../sto
 
 const emit = defineEmits(['change-tab'])
 
-const stats = ref(getStats())
-const bills = ref(getBills())
-const contracts = ref(getContracts())
-const properties = ref(getProperties())
+const stats = ref({totalPending: 0, totalOverdue: 0, pendingCount: 0, overdueCount: 0, upcomingCount: 0, activeCount: 0, dueThisWeek: 0, totalDeposit: 0})
+const bills = ref([])
+const contracts = ref([])
+const properties = ref([])
 const showPayModal = ref(false)
 const selectedBill = ref(null)
+const loading = ref(true)
 
-onMounted(() => {
-  refresh()
+onMounted(async () => {
+  try {
+    [stats.value, bills.value, contracts.value, properties.value] = await Promise.all([
+      getStats(),
+      getBills(),
+      getContracts(),
+      getProperties()
+    ])
+  } catch(e) {
+    console.error(e)
+  } finally {
+    loading.value = false
+  }
 })
 
-function refresh() {
-  stats.value = getStats()
-  bills.value = getBills()
-  contracts.value = getContracts()
-  properties.value = getProperties()
+async function confirmPay() {
+  if (!selectedBill.value) return
+  try {
+    await payBill(selectedBill.value.id)
+    showPayModal.value = false
+    selectedBill.value = null
+    // Refresh data
+    [stats.value, bills.value] = await Promise.all([getStats(), getBills()])
+  } catch(e) {
+    console.error(e)
+  }
 }
 
 const sortedBills = computed(() => {
@@ -32,14 +50,6 @@ const sortedBills = computed(() => {
 function openPay(bill) {
   selectedBill.value = bill
   showPayModal.value = true
-}
-
-function confirmPay() {
-  if (!selectedBill.value) return
-  payBill(selectedBill.value.id)
-  showPayModal.value = false
-  selectedBill.value = null
-  refresh()
 }
 
 function formatDate(d) {
@@ -66,10 +76,6 @@ function dueLabel(due) {
 function formatAmount(n) {
   return n ? n.toLocaleString() : '0'
 }
-
-function refreshData() {
-  refresh()
-}
 </script>
 
 <template>
@@ -84,11 +90,11 @@ function refreshData() {
 
     <!-- 统计卡片 -->
     <div class="stat-grid">
-      <div class="stat-card">
+      <div class="stat-card cyan">
         <div class="stat-value">¥{{ formatAmount(stats.totalPending) }}</div>
         <div class="stat-label">待收总额</div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card green">
         <div class="stat-value" style="color:var(--text)">{{ stats.pendingCount }}</div>
         <div class="stat-label">待收笔数</div>
       </div>
@@ -112,7 +118,7 @@ function refreshData() {
         </div>
         <div style="width:1px;background:var(--border)"></div>
         <div style="text-align:center;flex:1">
-          <div style="font-size:18px;font-weight:700;color:var(--accent)">{{ formatAmount(stats.totalOverdue) }}</div>
+          <div style="font-size:18px;font-weight:700;color:var(--accent)">¥{{ formatAmount(stats.totalOverdue) }}</div>
           <div style="font-size:11px;color:var(--text-muted)">逾期金额</div>
         </div>
       </div>
@@ -121,7 +127,12 @@ function refreshData() {
     <!-- 待办账单 -->
     <div class="section-title">📅 待办账单</div>
 
-    <div v-if="sortedBills.length === 0" class="empty">
+    <div v-if="loading" class="empty">
+      <div class="empty-icon">⏳</div>
+      <div class="empty-text">加载中...</div>
+    </div>
+
+    <div v-else-if="sortedBills.length === 0" class="empty">
       <div class="empty-icon">🎉</div>
       <div class="empty-text">暂无待办账单</div>
     </div>
@@ -138,7 +149,7 @@ function refreshData() {
           <span style="font-size:14px;font-weight:600">{{ bill.tenantName }}</span>
           <span class="tag">{{ bill.type === 'deposit' ? '质保金' : '租金' }}</span>
         </div>
-        <div style="font-size:12px;color:var(--text-dim)">{{ bill.propertyName }}</div>
+        <div style="font-size:12px;color:var(--text-muted)">{{ bill.propertyName }}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:17px;font-weight:700;color:var(--accent)">¥{{ formatAmount(bill.amount) }}</div>
@@ -156,23 +167,23 @@ function refreshData() {
         <div class="modal-title">💰 确认收款</div>
         <div v-if="selectedBill" class="card">
           <div style="display:flex;justify-content:space-between;margin-bottom:10px">
-            <span style="color:var(--text-dim);font-size:13px">租客</span>
+            <span style="color:var(--text-muted);font-size:13px">租客</span>
             <span style="font-weight:600">{{ selectedBill.tenantName }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:10px">
-            <span style="color:var(--text-dim);font-size:13px">房源</span>
+            <span style="color:var(--text-muted);font-size:13px">房源</span>
             <span style="font-size:13px">{{ selectedBill.propertyName }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:10px">
-            <span style="color:var(--text-dim);font-size:13px">类型</span>
+            <span style="color:var(--text-muted);font-size:13px">类型</span>
             <span class="tag">{{ selectedBill.type === 'deposit' ? '质保金' : '租金' }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:10px">
-            <span style="color:var(--text-dim);font-size:13px">到期日</span>
+            <span style="color:var(--text-muted);font-size:13px">到期日</span>
             <span style="font-size:13px">{{ selectedBill.dueDate }}</span>
           </div>
           <div style="display:flex;justify-content:space-between">
-            <span style="color:var(--text-dim);font-size:13px">金额</span>
+            <span style="color:var(--text-muted);font-size:13px">金额</span>
             <span style="font-size:22px;font-weight:700;color:var(--accent)">¥{{ formatAmount(selectedBill.amount) }}</span>
           </div>
         </div>

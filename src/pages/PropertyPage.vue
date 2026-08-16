@@ -3,16 +3,22 @@ import { ref, onMounted } from 'vue'
 import { getProperties, addProperty, updateProperty, deleteProperty, getContracts } from '../store.js'
 
 const properties = ref([])
+const contracts = ref([])
 const showModal = ref(false)
 const editing = ref(null)
 const form = ref({ name: '', address: '', remark: '' })
 const toast = ref('')
+const loading = ref(true)
 
-onMounted(() => refresh())
-
-function refresh() {
-  properties.value = getProperties()
-}
+onMounted(async () => {
+  try {
+    [properties.value, contracts.value] = await Promise.all([getProperties(), getContracts()])
+  } catch(e) {
+    console.error(e)
+  } finally {
+    loading.value = false
+  }
+})
 
 function openAdd() {
   editing.value = null
@@ -26,27 +32,38 @@ function openEdit(p) {
   showModal.value = true
 }
 
-function save() {
+async function save() {
   if (!form.value.name.trim()) { showToast('请输入房源名称'); return }
-  if (editing.value) {
-    updateProperty(editing.value.id, form.value)
-  } else {
-    addProperty(form.value)
+  try {
+    if (editing.value) {
+      await updateProperty(editing.value.id, form.value)
+    } else {
+      await addProperty(form.value)
+    }
+    showModal.value = false
+    properties.value = await getProperties()
+    showToast(editing.value ? '已更新' : '已添加')
+  } catch(e) {
+    console.error(e)
+    showToast('操作失败')
   }
-  showModal.value = false
-  refresh()
-  showToast(editing.value ? '已更新' : '已添加')
 }
 
-function del(p) {
+async function del(p) {
   if (!confirm(`确认删除「${p.name}」？\n关联合同和账单将一并删除。`)) return
-  deleteProperty(p.id)
-  refresh()
-  showToast('已删除')
+  try {
+    await deleteProperty(p.id)
+    properties.value = await getProperties()
+    contracts.value = await getContracts()
+    showToast('已删除')
+  } catch(e) {
+    console.error(e)
+    showToast('删除失败')
+  }
 }
 
 function getContractCount(propertyId) {
-  return getContracts().filter(c => c.propertyId === propertyId).length
+  return contracts.value.filter(c => c.propertyId === propertyId).length
 }
 
 function showToast(msg) {
@@ -62,7 +79,12 @@ function showToast(msg) {
       <button class="btn btn-primary btn-sm" style="width:auto;padding:8px 16px" @click="openAdd">+ 添加</button>
     </div>
 
-    <div v-if="properties.length === 0" class="empty">
+    <div v-if="loading" class="empty">
+      <div class="empty-icon">⏳</div>
+      <div class="empty-text">加载中...</div>
+    </div>
+
+    <div v-else-if="properties.length === 0" class="empty">
       <div class="empty-icon">🏢</div>
       <div class="empty-text">还没有房源，点击上方添加</div>
     </div>
@@ -77,7 +99,7 @@ function showToast(msg) {
       <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
         <div>
           <div style="font-size:16px;font-weight:600;margin-bottom:3px">{{ p.name }}</div>
-          <div style="font-size:12px;color:var(--text-dim)">{{ p.address || '未填写地址' }}</div>
+          <div style="font-size:12px;color:var(--text-muted)">{{ p.address || '未填写地址' }}</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center" @click.stop>
           <span class="badge badge-info">{{ getContractCount(p.id) }} 合同</span>

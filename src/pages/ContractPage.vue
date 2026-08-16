@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import {
   getContracts, getProperties, getBills, addContract, updateContract,
-  deleteContract, payBill, cycleText, generateBillsForContract
+  deleteContract, payBill, cycleText
 } from '../store.js'
 
 const contracts = ref([])
@@ -13,25 +13,35 @@ const showDetail = ref(false)
 const showBillList = ref(false)
 const editing = ref(null)
 const selectedContract = ref(null)
-const tab = ref('active') // active | ended
+const tab = ref('active')
 const toast = ref('')
+const loading = ref(true)
 
-onMounted(() => refresh())
+onMounted(async () => {
+  try {
+    [contracts.value, properties.value, bills.value] = await Promise.all([
+      getContracts(), getProperties(), getBills()
+    ])
+  } catch(e) {
+    console.error(e)
+  } finally {
+    loading.value = false
+  }
+})
 
-function refresh() {
-  contracts.value = getContracts()
-  properties.value = getProperties()
-  bills.value = getBills()
+async function refresh() {
+  try {
+    [contracts.value, properties.value, bills.value] = await Promise.all([
+      getContracts(), getProperties(), getBills()
+    ])
+  } catch(e) { console.error(e) }
 }
 
-const displayed = computed(() => {
-  return contracts.value.filter(c => c.status === tab.value)
-})
+const displayed = computed(() => contracts.value.filter(c => c.status === tab.value))
 
 const contractBills = computed(() => {
   if (!selectedContract.value) return []
-  return bills.value
-    .filter(b => b.contractId === selectedContract.value.id)
+  return bills.value.filter(b => b.contractId === selectedContract.value.id)
     .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
 })
 
@@ -78,7 +88,7 @@ function onPropertyChange(e) {
   if (p) form.value.propertyName = p.name
 }
 
-function save() {
+async function save() {
   const f = form.value
   if (!f.propertyId) { showToast('请选择房源'); return }
   if (!f.tenantName.trim()) { showToast('请输入租客姓名'); return }
@@ -87,23 +97,32 @@ function save() {
   if (new Date(f.endDate) <= new Date(f.startDate)) { showToast('结束日期必须晚于开始日期'); return }
 
   const data = { ...f, rentAmount: Number(f.rentAmount), depositAmount: Number(f.depositAmount) || 0 }
-
-  if (editing.value) {
-    updateContract(editing.value.id, data)
-    showToast('已更新')
-  } else {
-    const c = addContract(data)
-    showToast('已添加')
+  try {
+    if (editing.value) {
+      await updateContract(editing.value.id, data)
+      showToast('已更新')
+    } else {
+      await addContract(data)
+      showToast('已添加')
+    }
+    showModal.value = false
+    await refresh()
+  } catch(e) {
+    console.error(e)
+    showToast('操作失败')
   }
-  showModal.value = false
-  refresh()
 }
 
-function del(c) {
+async function del(c) {
   if (!confirm(`确认删除「${c.tenantName}」的合同？\n关联账单也将一并删除。`)) return
-  deleteContract(c.id)
-  refresh()
-  showToast('已删除')
+  try {
+    await deleteContract(c.id)
+    await refresh()
+    showToast('已删除')
+  } catch(e) {
+    console.error(e)
+    showToast('删除失败')
+  }
 }
 
 function viewDetail(c) {
@@ -116,10 +135,15 @@ function viewBills(c) {
   showBillList.value = true
 }
 
-function pay(billId) {
-  payBill(billId)
-  refresh()
-  showToast('已标记为已付')
+async function pay(billId) {
+  try {
+    await payBill(billId)
+    bills.value = await getBills()
+    showToast('已标记为已付')
+  } catch(e) {
+    console.error(e)
+    showToast('操作失败')
+  }
 }
 
 function formatAmount(n) {
@@ -171,7 +195,12 @@ function statusBadge(c) {
       >已结束</button>
     </div>
 
-    <div v-if="displayed.length === 0" class="empty">
+    <div v-if="loading" class="empty">
+      <div class="empty-icon">⏳</div>
+      <div class="empty-text">加载中...</div>
+    </div>
+
+    <div v-else-if="displayed.length === 0" class="empty">
       <div class="empty-icon">📋</div>
       <div class="empty-text">{{ tab === 'active' ? '暂无进行中合同' : '暂无已结束合同' }}</div>
     </div>
@@ -187,7 +216,7 @@ function statusBadge(c) {
             <span style="font-size:16px;font-weight:600">{{ c.tenantName }}</span>
             <span class="badge" :class="statusBadge(c).cls">{{ statusBadge(c).text }}</span>
           </div>
-          <div style="font-size:12px;color:var(--text-dim)">{{ c.propertyName }}</div>
+          <div style="font-size:12px;color:var(--text-muted)">{{ c.propertyName }}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px">{{ c.tenantPhone }}</div>
         </div>
         <div style="text-align:right">
@@ -273,35 +302,35 @@ function statusBadge(c) {
         <div class="modal-title">📋 合同详情</div>
         <div class="card">
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-dim);font-size:13px">租客</span>
+            <span style="color:var(--text-muted);font-size:13px">租客</span>
             <span style="font-weight:600">{{ selectedContract.tenantName }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-dim);font-size:13px">房源</span>
+            <span style="color:var(--text-muted);font-size:13px">房源</span>
             <span style="font-size:13px">{{ selectedContract.propertyName }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-dim);font-size:13px">联系电话</span>
+            <span style="color:var(--text-muted);font-size:13px">联系电话</span>
             <span style="font-size:13px">{{ selectedContract.tenantPhone || '-' }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-dim);font-size:13px">月租金</span>
+            <span style="color:var(--text-muted);font-size:13px">月租金</span>
             <span style="font-weight:700;color:var(--accent)">¥{{ formatAmount(selectedContract.rentAmount) }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-dim);font-size:13px">质保金</span>
+            <span style="color:var(--text-muted);font-size:13px">质保金</span>
             <span style="font-size:13px">¥{{ formatAmount(selectedContract.depositAmount) }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-dim);font-size:13px">付款方式</span>
+            <span style="color:var(--text-muted);font-size:13px">付款方式</span>
             <span class="tag">{{ cycleText(selectedContract.paymentCycle) }}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-dim);font-size:13px">租期</span>
+            <span style="color:var(--text-muted);font-size:13px">租期</span>
             <span style="font-size:13px">{{ formatDate(selectedContract.startDate)}} ~ {{ formatDate(selectedContract.endDate) }}</span>
           </div>
           <div style="display:flex;justify-content:space-between">
-            <span style="color:var(--text-dim);font-size:13px">状态</span>
+            <span style="color:var(--text-muted);font-size:13px">状态</span>
             <span class="badge" :class="statusBadge(selectedContract).cls">{{ statusBadge(selectedContract).text }}</span>
           </div>
         </div>
@@ -332,7 +361,7 @@ function statusBadge(c) {
               <span style="font-size:14px;font-weight:600">{{ bill.tenantName }}</span>
               <span class="tag" style="font-size:10px">{{ bill.type==='deposit'?'质保金':'租金' }}</span>
             </div>
-            <div style="font-size:12px;color:var(--text-dim)">到期：{{ bill.dueDate }}</div>
+            <div style="font-size:12px;color:var(--text-muted)">到期：{{ bill.dueDate }}</div>
           </div>
           <div style="text-align:right">
             <div style="font-size:16px;font-weight:700;color:var(--accent)">¥{{ formatAmount(bill.amount) }}</div>
