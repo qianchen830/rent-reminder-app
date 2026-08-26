@@ -21,22 +21,31 @@ const server = createServer(async (req, res) => {
   const url = req.url || '/'
 
   if (url.startsWith('/api')) {
-    // Proxy to Express backend
+    // Read request body for POST/PUT/PATCH
+    const bodyChunks = []
+    for await (const chunk of req) {
+      bodyChunks.push(chunk)
+    }
+    const rawBody = Buffer.concat(bodyChunks)
+
     const opts = {
       method: req.method,
       headers: { ...req.headers, host: 'localhost:3002' },
-      path: url,
     }
+    if (rawBody.length > 0) {
+      opts.body = rawBody
+    }
+
     try {
       const proxied = await fetch(API_TARGET + url, opts)
-      const body = await proxied.arrayBuffer()
+      const proxiedBody = await proxied.arrayBuffer()
       res.writeHead(proxied.status, {
         ...Object.fromEntries(proxied.headers.entries()),
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       })
-      res.end(Buffer.from(body))
+      res.end(Buffer.from(proxiedBody))
     } catch (e) {
       res.writeHead(502)
       res.end('Backend unavailable')
@@ -47,7 +56,6 @@ const server = createServer(async (req, res) => {
   // Serve Vite preview dist
   let filePath = join(DIST_DIR, url === '/' ? 'index.html' : url)
   if (!existsSync(filePath)) {
-    // SPA fallback
     filePath = join(DIST_DIR, 'index.html')
   }
 
