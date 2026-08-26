@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -33,9 +34,91 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- JPush AppKey -->
+        <meta-data
+            android:name="JPUSH_APPKEY"
+            android:value="38c32db4df3d00fd135a10b5"/>
+
+        <!-- ========== 强制设置 android:exported=true (Android 12+ 要求) ========== -->
+        <!-- service: cn.jiguang.cordova.push.PushService -->
+        <service
+            android:name="cn.jiguang.cordova.push.PushService"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jiguang.cordova.push.JPushEventReceiver -->
+        <receiver
+            android:name="cn.jiguang.cordova.push.JPushEventReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jiguang.cordova.push.JPushReceiver -->
+        <receiver
+            android:name="cn.jiguang.cordova.push.JPushReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jpush.android.service.PushReceiver -->
+        <receiver
+            android:name="cn.jpush.android.service.PushReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jpush.android.service.AlarmReceiver -->
+        <receiver
+            android:name="cn.jpush.android.service.AlarmReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jpush.android.service.PluginVivoMessageReceiver -->
+        <receiver
+            android:name="cn.jpush.android.service.PluginVivoMessageReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jpush.android.service.PluginHuaweiPlatformsReceiver -->
+        <receiver
+            android:name="cn.jpush.android.service.PluginHuaweiPlatformsReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jpush.android.service.PluginMeizuPlatformsReceiver -->
+        <receiver
+            android:name="cn.jpush.android.service.PluginMeizuPlatformsReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: cn.jpush.android.service.PluginXiaomiPlatformsReceiver -->
+        <receiver
+            android:name="cn.jpush.android.service.PluginXiaomiPlatformsReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: com.xiaomi.push.service.receivers.NetworkStatusReceiver -->
+        <receiver
+            android:name="com.xiaomi.push.service.receivers.NetworkStatusReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- receiver: com.xiaomi.push.service.receivers.PingReceiver -->
+        <receiver
+            android:name="com.xiaomi.push.service.receivers.PingReceiver"
+            android:exported="true"
+            tools:node="replace"/>
+
+        <!-- service: cn.jpush.android.service.PluginOppoPushService -->
+        <service
+            android:name="cn.jpush.android.service.PluginOppoPushService"
+            android:exported="true"
+            tools:node="replace"/>
+
     </application>
 
     <!-- Permissions -->
-
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
 </manifest>

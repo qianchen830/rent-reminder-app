@@ -174,68 +174,108 @@ function statusBadge(c) {
 
 <template>
   <div>
+    <!-- Header -->
     <div class="page-header">
-      <div class="page-title">📋 合同管理</div>
-      <button class="btn btn-primary btn-sm" style="width:auto;padding:8px 16px" @click="openAdd">+ 新签合同</button>
+      <div>
+        <div class="page-title">📋 合同管理</div>
+        <div class="text-muted text-xs mt-1">共 {{ contracts.length }} 份合同</div>
+      </div>
+      <button class="btn btn-primary btn-sm" style="width:auto;padding:9px 18px" @click="openAdd">
+        <span>＋</span> 新签合同
+      </button>
     </div>
 
-    <!-- Tab -->
-    <div style="display:flex;gap:8px;margin-bottom:16px">
+    <!-- Tab filter -->
+    <div class="tab-filter">
       <button
-        class="btn btn-sm"
-        :class="tab==='active'?'btn-primary':'btn-secondary'"
-        style="width:auto;flex:none"
-        @click="tab='active'"
-      >进行中</button>
+        class="tab-filter-btn"
+        :class="{ active: tab === 'active' }"
+        @click="tab = 'active'"
+      >
+        <span class="tab-filter-dot success"></span>
+        进行中
+        <span class="tab-filter-count">{{ contracts.filter(c => c.status === 'active').length }}</span>
+      </button>
       <button
-        class="btn btn-sm"
-        :class="tab==='ended'?'btn-primary':'btn-secondary'"
-        style="width:auto;flex:none"
-        @click="tab='ended'"
-      >已结束</button>
+        class="tab-filter-btn"
+        :class="{ active: tab === 'ended' }"
+        @click="tab = 'ended'"
+      >
+        <span class="tab-filter-dot info"></span>
+        已结束
+        <span class="tab-filter-count">{{ contracts.filter(c => c.status === 'ended').length }}</span>
+      </button>
     </div>
 
-    <div v-if="loading" class="empty">
-      <div class="empty-icon">⏳</div>
-      <div class="empty-text">加载中...</div>
-    </div>
+    <!-- Loading -->
+    <template v-if="loading">
+      <div v-for="i in 3" :key="i" class="contract-card contract-skeleton">
+        <div class="skeleton" style="height:18px;width:40%;margin-bottom:10px;border-radius:6px"></div>
+        <div class="skeleton" style="height:13px;width:65%;border-radius:6px"></div>
+      </div>
+    </template>
 
+    <!-- Empty -->
     <div v-else-if="displayed.length === 0" class="empty">
-      <div class="empty-icon">📋</div>
+      <div class="empty-icon">{{ tab === 'active' ? '📋' : '📁' }}</div>
       <div class="empty-text">{{ tab === 'active' ? '暂无进行中合同' : '暂无已结束合同' }}</div>
     </div>
 
+    <!-- Contract list -->
     <div
-      v-for="c in displayed"
+      v-for="(c, idx) in displayed"
       :key="c.id"
-      class="card"
+      class="contract-card"
+      :style="{ animationDelay: idx * 50 + 'ms' }"
     >
-      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
-            <span style="font-size:16px;font-weight:600">{{ c.tenantName }}</span>
+      <!-- Top row: tenant info + amount -->
+      <div class="contract-top">
+        <div class="contract-avatar">{{ c.tenantName[0] }}</div>
+        <div class="contract-info">
+          <div class="contract-name-row">
+            <span class="contract-name">{{ c.tenantName }}</span>
             <span class="badge" :class="statusBadge(c).cls">{{ statusBadge(c).text }}</span>
           </div>
-          <div style="font-size:12px;color:var(--text-muted)">{{ c.propertyName }}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">{{ c.tenantPhone }}</div>
+          <div class="contract-meta">
+            <span>🏢 {{ c.propertyName }}</span>
+            <span v-if="c.tenantPhone">📞 {{ c.tenantPhone }}</span>
+          </div>
         </div>
-        <div style="text-align:right">
-          <div style="font-size:20px;font-weight:700;color:var(--accent)">¥{{ formatAmount(c.rentAmount) }}</div>
-          <div style="font-size:11px;color:var(--text-muted)">/{{ cycleText(c.paymentCycle) }}</div>
+        <div class="contract-amount">
+          <div class="contract-rent">¥{{ formatAmount(c.rentAmount) }}</div>
+          <div class="contract-cycle">/{{ cycleText(c.paymentCycle) }}</div>
         </div>
       </div>
 
-      <div style="display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <button class="btn btn-secondary btn-sm" style="flex:1" @click="viewBills(c)">账单</button>
-        <button class="btn btn-secondary btn-sm" style="flex:1" @click="viewDetail(c)">详情</button>
-        <button class="btn btn-secondary btn-sm" style="flex:1" @click="openEdit(c)">编辑</button>
-        <button class="btn btn-danger btn-sm" style="flex:1" @click="del(c)">删除</button>
+      <!-- Period info -->
+      <div class="contract-period">
+        <span class="period-icon">📅</span>
+        <span class="period-text">{{ formatDate(c.startDate) }} — {{ formatDate(c.endDate) }}</span>
+        <span class="period-tag" :class="statusBadge(c).cls.replace('badge-', 'ptag-')">
+          {{ cycleText(c.paymentCycle) }}
+        </span>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="contract-actions">
+        <button class="action-btn action-info" @click="viewBills(c)">
+          <span>📋</span> 账单
+        </button>
+        <button class="action-btn action-secondary" @click="viewDetail(c)">
+          <span>👁️</span> 详情
+        </button>
+        <button class="action-btn action-secondary" @click="openEdit(c)">
+          <span>✏️</span> 编辑
+        </button>
+        <button class="action-btn action-danger" @click="del(c)">
+          <span>🗑️</span> 删除
+        </button>
       </div>
     </div>
 
-    <!-- 添加/编辑合同 -->
+    <!-- Add/Edit modal -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
-      <div class="modal-sheet" style="max-height:95vh;overflow-y:auto">
+      <div class="modal-sheet">
         <div class="modal-title">{{ editing ? '✏️ 编辑合同' : '📝 新签合同' }}</div>
 
         <div class="input-group">
@@ -246,7 +286,7 @@ function statusBadge(c) {
           </select>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="input-group">
             <label>租客姓名 *</label>
             <input v-model="form.tenantName" class="input" placeholder="姓名" />
@@ -257,7 +297,7 @@ function statusBadge(c) {
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="input-group">
             <label>月租金 *</label>
             <input v-model="form.rentAmount" class="input" type="number" placeholder="0" />
@@ -278,7 +318,7 @@ function statusBadge(c) {
           </select>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="input-group">
             <label>开始日期 *</label>
             <input v-model="form.startDate" class="input" type="date" />
@@ -291,56 +331,58 @@ function statusBadge(c) {
 
         <div class="modal-actions">
           <button class="btn btn-secondary" @click="showModal=false">取消</button>
-          <button class="btn btn-primary" @click="save">{{ editing ? '保存' : '创建合同' }}</button>
+          <button class="btn btn-primary" @click="save">{{ editing ? '保存修改' : '创建合同' }}</button>
         </div>
       </div>
     </div>
 
-    <!-- 合同详情 -->
+    <!-- Detail modal -->
     <div v-if="showDetail && selectedContract" class="modal-overlay" @click.self="showDetail=false">
       <div class="modal-sheet">
         <div class="modal-title">📋 合同详情</div>
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-muted);font-size:13px">租客</span>
-            <span style="font-weight:600">{{ selectedContract.tenantName }}</span>
+
+        <div class="detail-card">
+          <div class="detail-avatar-row">
+            <div class="detail-avatar">{{ selectedContract.tenantName[0] }}</div>
+            <div>
+              <div class="detail-name">{{ selectedContract.tenantName }}</div>
+              <span class="badge" :class="statusBadge(selectedContract).cls">{{ statusBadge(selectedContract).text }}</span>
+            </div>
           </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-muted);font-size:13px">房源</span>
-            <span style="font-size:13px">{{ selectedContract.propertyName }}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-muted);font-size:13px">联系电话</span>
-            <span style="font-size:13px">{{ selectedContract.tenantPhone || '-' }}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-muted);font-size:13px">月租金</span>
-            <span style="font-weight:700;color:var(--accent)">¥{{ formatAmount(selectedContract.rentAmount) }}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-muted);font-size:13px">质保金</span>
-            <span style="font-size:13px">¥{{ formatAmount(selectedContract.depositAmount) }}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-muted);font-size:13px">付款方式</span>
-            <span class="tag">{{ cycleText(selectedContract.paymentCycle) }}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="color:var(--text-muted);font-size:13px">租期</span>
-            <span style="font-size:13px">{{ formatDate(selectedContract.startDate)}} ~ {{ formatDate(selectedContract.endDate) }}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between">
-            <span style="color:var(--text-muted);font-size:13px">状态</span>
-            <span class="badge" :class="statusBadge(selectedContract).cls">{{ statusBadge(selectedContract).text }}</span>
+
+          <div class="detail-rows">
+            <div class="detail-row">
+              <span class="detail-label">房源</span>
+              <span class="detail-val">{{ selectedContract.propertyName }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">联系电话</span>
+              <span class="detail-val text-muted">{{ selectedContract.tenantPhone || '—' }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">月租金</span>
+              <span class="detail-val accent">¥{{ formatAmount(selectedContract.rentAmount) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">质保金</span>
+              <span class="detail-val">¥{{ formatAmount(selectedContract.depositAmount) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">付款方式</span>
+              <span class="tag">{{ cycleText(selectedContract.paymentCycle) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">租期</span>
+              <span class="detail-val">{{ formatDate(selectedContract.startDate) }} ~ {{ formatDate(selectedContract.endDate) }}</span>
+            </div>
           </div>
         </div>
-        <div style="margin-top:16px">
-          <button class="btn btn-secondary" @click="showDetail=false">关闭</button>
-        </div>
+
+        <button class="btn btn-secondary" style="margin-top:16px" @click="showDetail=false">关闭</button>
       </div>
     </div>
 
-    <!-- 账单列表 -->
+    <!-- Bill list modal -->
     <div v-if="showBillList && selectedContract" class="modal-overlay" @click.self="showBillList=false">
       <div class="modal-sheet" style="max-height:90vh;overflow-y:auto">
         <div class="modal-title">💰 {{ selectedContract.tenantName }}的账单</div>
@@ -353,33 +395,252 @@ function statusBadge(c) {
         <div
           v-for="bill in contractBills"
           :key="bill.id"
-          class="card"
-          style="display:flex;align-items:center;gap:10px"
+          class="bill-item"
         >
-          <div style="flex:1">
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:14px;font-weight:600">{{ bill.tenantName }}</span>
-              <span class="tag" style="font-size:10px">{{ bill.type==='deposit'?'质保金':'租金' }}</span>
+          <div class="bill-item-left">
+            <div class="bill-item-type">
+              <span class="tag" :class="bill.type === 'deposit' ? 'tag-purple' : ''">
+                {{ bill.type === 'deposit' ? '质保金' : '租金' }}
+              </span>
             </div>
-            <div style="font-size:12px;color:var(--text-muted)">到期：{{ bill.dueDate }}</div>
+            <div class="bill-item-date">到期：{{ bill.dueDate }}</div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:16px;font-weight:700;color:var(--accent)">¥{{ formatAmount(bill.amount) }}</div>
+          <div class="bill-item-right">
+            <div class="bill-item-amount">¥{{ formatAmount(bill.amount) }}</div>
             <span
               class="badge"
-              :class="bill.status==='paid'?'badge-success':'badge-warning'"
+              :class="bill.status==='paid' ? 'badge-success' : 'badge-warning'"
               style="cursor:pointer"
               @click="bill.status!=='paid' && pay(bill.id)"
-            >{{ bill.status === 'paid' ? '已付' : '待付 ⟶' }}</span>
+            >{{ bill.status === 'paid' ? '已付 ✓' : '待付 ⟶' }}</span>
           </div>
         </div>
 
-        <div style="margin-top:16px">
-          <button class="btn btn-secondary" @click="showBillList=false">关闭</button>
-        </div>
+        <button class="btn btn-secondary" style="margin-top:16px" @click="showBillList=false">关闭</button>
       </div>
     </div>
 
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
 </template>
+
+<style scoped>
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Tab filter */
+.tab-filter {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tab-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+}
+.tab-filter-btn:hover { border-color: var(--border-accent); color: var(--text-primary); }
+.tab-filter-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--border-accent);
+  color: var(--accent);
+}
+.tab-filter-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+}
+.tab-filter-dot.success { background: var(--success); }
+.tab-filter-dot.info { background: var(--accent); }
+.tab-filter-count {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+}
+
+/* Contract card */
+.contract-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 12px;
+  transition: all 0.2s var(--ease-out);
+  box-shadow: var(--shadow-card);
+  animation: slideInUp 0.3s var(--ease-out) both;
+}
+.contract-card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
+}
+
+.contract-skeleton { animation: none; }
+
+.contract-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.contract-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 800;
+  color: #020714;
+  flex-shrink: 0;
+  box-shadow: 0 2px 12px rgba(0,212,255,0.25);
+}
+
+.contract-info { flex: 1; min-width: 0; }
+.contract-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.contract-name { font-size: 16px; font-weight: 800; }
+.contract-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.contract-amount { text-align: right; flex-shrink: 0; }
+.contract-rent {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+}
+.contract-cycle { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+
+/* Period row */
+.contract-period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.025);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.period-icon { font-size: 13px; }
+.period-text { flex: 1; font-weight: 600; color: var(--text-secondary); }
+.period-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+.ptag-success { background: var(--success-dim); color: var(--success); }
+.ptag-warning { background: var(--warning-dim); color: var(--warning); }
+.ptag-danger { background: var(--danger-dim); color: var(--danger); }
+.ptag-info { background: var(--accent-dim); color: var(--accent); }
+
+/* Action buttons */
+.contract-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s var(--ease-out);
+  color: var(--text-secondary);
+}
+.action-btn:hover { transform: translateY(-1px); }
+.action-secondary:hover { background: rgba(255,255,255,0.06); border-color: var(--border-accent); color: var(--text-primary); }
+.action-info:hover { background: var(--accent-dim); border-color: var(--border-accent); color: var(--accent); }
+.action-danger:hover { background: var(--danger-dim); border-color: rgba(255,69,96,0.3); color: var(--danger); }
+
+/* Detail card */
+.detail-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.detail-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,212,255,0.03);
+}
+.detail-avatar {
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 800;
+  color: #020714;
+  box-shadow: 0 4px 16px rgba(0,212,255,0.3);
+}
+.detail-name { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+.detail-rows { padding: 4px 0; }
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.detail-row:last-child { border-bottom: none; }
+.detail-label { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+.detail-val { font-weight: 700; color: var(--text-primary); }
+.detail-val.accent { color: var(--accent); font-size: 16px; }
+
+/* Bill item */
+.bill-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+  transition: all 0.15s;
+}
+.bill-item:hover { border-color: var(--border-accent); }
+.bill-item-left { display: flex; flex-direction: column; gap: 4px; }
+.bill-item-date { font-size: 12px; color: var(--text-muted); }
+.bill-item-right { text-align: right; }
+.bill-item-amount { font-size: 17px; font-weight: 800; color: var(--accent); margin-bottom: 4px; }
+</style>

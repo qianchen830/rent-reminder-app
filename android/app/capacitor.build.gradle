@@ -10,7 +10,7 @@ android {
 apply from: "../capacitor-cordova-android-plugins/cordova.variables.gradle"
 dependencies {
 
-
+    implementation "cn.jiguang.sdk:jcore:5.5.0"
 }
 
 
