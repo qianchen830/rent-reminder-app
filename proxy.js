@@ -59,27 +59,35 @@ const server = createServer(async (req, res) => {
   }
 
   // Serve APK if requested
-  if (url.endsWith('.apk')) {
-    const apkPath = join(APK_DIR, url.split('/').pop())
+  // Strip query string for file-system lookups
+  const urlPath = url.split('?')[0]
+
+  if (urlPath.endsWith('.apk')) {
+    const apkPath = join(APK_DIR, urlPath.split('/').pop())
     if (existsSync(apkPath)) {
       try {
         const data = readFileSync(apkPath)
         res.writeHead(200, {
           'Content-Type': 'application/vnd.android.package-archive',
           'Content-Length': data.length,
-          'Content-Disposition': 'attachment; filename="' + url.split('/').pop() + '"',
+          'Content-Disposition': 'attachment; filename="' + urlPath.split('/').pop() + '"',
         })
         res.end(data)
+        return
       } catch {
-        res.writeHead(404)
-        res.end('APK not found')
+        res.writeHead(500)
+        res.end('APK read error')
+        return
       }
+    } else {
+      res.writeHead(404)
+      res.end('APK not found')
       return
     }
   }
 
   // Serve static files (SPA fallback)
-  let filePath = join(DIST_DIR, url === '/' ? 'index.html' : url)
+  let filePath = join(DIST_DIR, urlPath === '/' ? 'index.html' : urlPath)
   if (!existsSync(filePath)) {
     filePath = join(DIST_DIR, 'index.html')
   }
@@ -87,9 +95,10 @@ const server = createServer(async (req, res) => {
   try {
     const data = readFileSync(filePath)
     const ext = extname(filePath).toLowerCase()
+    const isIndex = filePath.endsWith('index.html')
     res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'no-cache, no-store',
     })
     res.end(data)
   } catch {

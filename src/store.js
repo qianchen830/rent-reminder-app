@@ -71,11 +71,13 @@ export async function getContracts() { return await get('/contracts') }
 export async function addContract(data) { return await post('/contracts', data) }
 export async function updateContract(id, data) { return await post(`/contracts/${id}`, data) }
 export async function deleteContract(id) { return await del(`/contracts/${id}`) }
+export async function endContract(id) { return await post(`/contracts/${id}/end`, {}) }
 
 // Bills
 export async function getBills() { return await get('/bills') }
 export async function addBill(data) { return await post('/bills', data) }
 export async function payBill(id) { return await post(`/bills/${id}/pay`, {}) }
+export async function unpayBill(id) { return await post(`/bills/${id}/unpay`, {}) }
 
 // Stats
 export async function getStats() { return await get('/stats') }
@@ -85,6 +87,7 @@ export async function getDeposits() { return await get('/deposits') }
 export async function addDeposit(data) { return await post('/deposits', data) }
 export async function updateDeposit(id, data) { return await post(`/deposits/${id}`, data) }
 export async function deleteDeposit(id) { return await del(`/deposits/${id}`) }
+export async function convertDeposit(id, billId) { return await post(`/deposits/${id}/convert`, { billId }) }
 
 // Init sample
 export async function initSample() { return await post('/init-sample') }

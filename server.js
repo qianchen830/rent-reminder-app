@@ -284,6 +284,15 @@ app.delete('/api/contracts/:id', auth, (req, res) => {
   } catch (e) { fail(res, 500, e.message) }
 })
 
+app.post('/api/contracts/:id/end', auth, (req, res) => {
+  try {
+    db.prepare("UPDATE rent_contracts SET status='ended' WHERE id=?").run(req.params.id)
+    // Cancel all pending bills for this contract
+    db.prepare("UPDATE rent_bills SET status='cancelled' WHERE contractId=? AND status='pending'").run(req.params.id)
+    ok(res, db.prepare('SELECT * FROM rent_contracts WHERE id=?').get(req.params.id))
+  } catch (e) { fail(res, 500, e.message) }
+})
+
 // ── Bills ──────────────────────────────────
 app.get('/api/bills', auth, (req, res) => {
   try {
@@ -312,6 +321,14 @@ app.post('/api/bills/:id/pay', auth, (req, res) => {
   } catch (e) { fail(res, 500, e.message) }
 })
 
+app.post('/api/bills/:id/unpay', auth, (req, res) => {
+  try {
+    db.prepare("UPDATE rent_bills SET status='pending', paidAt=NULL WHERE id=?")
+      .run(req.params.id)
+    ok(res, db.prepare('SELECT * FROM rent_bills WHERE id=?').get(req.params.id))
+  } catch (e) { fail(res, 500, e.message) }
+})
+
 // ── Deposits ──────────────────────────────────
 app.get('/api/deposits', auth, (req, res) => {
   try {
@@ -328,6 +345,45 @@ app.post('/api/deposits', auth, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, contractId, propertyId, propertyName, tenantName, amount, status, remark, createdAt)
     ok(res, db.prepare('SELECT * FROM rent_deposits WHERE id=?').get(id))
+  } catch (e) { fail(res, 500, e.message) }
+})
+
+// IMPORTANT: /convert must come before /:id to avoid Express matching /convert as :id
+app.post('/api/deposits/:id/convert', auth, (req, res) => {
+  try {
+    const { billId } = req.body
+    if (!billId) { fail(res, 400, 'billId required'); return }
+
+    const deposit = db.prepare('SELECT * FROM rent_deposits WHERE id=?').get(req.params.id)
+    if (!deposit) { fail(res, 404, 'Deposit not found'); return }
+    if (deposit.status !== 'held') { fail(res, 400, 'Deposit not held'); return }
+
+    const bill = db.prepare("SELECT * FROM rent_bills WHERE id=? AND status='pending'").get(billId)
+    if (!bill) { fail(res, 404, 'Bill not found or already paid'); return }
+    if (bill.contractId !== deposit.contractId) { fail(res, 400, 'Bill does not belong to this deposit contract'); return }
+
+    const newBillAmount = Math.max(0, bill.amount - deposit.amount)
+    const newBillStatus = newBillAmount === 0 ? 'paid' : 'pending'
+    const paidAt = newBillStatus === 'paid' ? new Date().toISOString() : null
+    const depositRemark = `抵扣「${bill.tenantName}」${bill.dueDate}账单，原金额¥${bill.amount}，剩余¥${newBillAmount === 0 ? 0 : newBillAmount}`
+
+    const savepoint = `sp_${Date.now()}`
+    db.exec(`SAVEPOINT ${savepoint}`)
+    try {
+      db.prepare('UPDATE rent_bills SET amount=?, status=?, paidAt=? WHERE id=?')
+        .run(newBillAmount, newBillStatus, paidAt, billId)
+      db.prepare("UPDATE rent_deposits SET status='converted', remark=? WHERE id=?")
+        .run(depositRemark, req.params.id)
+      db.exec(`RELEASE SAVEPOINT ${savepoint}`)
+    } catch (e) {
+      db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`)
+      throw e
+    }
+
+    ok(res, {
+      deposit: db.prepare('SELECT * FROM rent_deposits WHERE id=?').get(req.params.id),
+      bill: db.prepare('SELECT * FROM rent_bills WHERE id=?').get(billId),
+    })
   } catch (e) { fail(res, 500, e.message) }
 })
 

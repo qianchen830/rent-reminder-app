@@ -785,3 +785,16 @@ select.input {
   text-transform: uppercase;
   letter-spacing: 0.8px;
 }
+
+/* Global select — make option text readable on dark bg */
+select {
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+select option {
+  background-color: var(--bg-deep) !important;
+  color: var(--text-primary) !important;
+}

@@ -1,17 +1,15 @@
 <script setup>
 const emit = defineEmits(['change-tab', 'logout', 'open-admin'])
 import { ref, onMounted, computed } from 'vue'
-import { getStats, getBills, getContracts, getDeposits, getProperties, addDeposit, updateDeposit, deleteDeposit, payBill } from '../store.js'
+import { getStats, getBills, getContracts, getDeposits, getProperties, payBill } from '../store.js'
 
 const stats = ref({})
 const bills = ref([])
 const contracts = ref([])
 const deposits = ref([])
 const properties = ref([])
-const showDepositModal = ref(false)
 const showBillsModal = ref(false)
 const toast = ref('')
-const tab = ref('deposit')
 const loading = ref(true)
 
 onMounted(async () => {
@@ -55,61 +53,7 @@ async function payBillById(id) {
   }
 }
 
-const depositForm = ref({ contractId: '', amount: '', remark: '' })
 
-function openDeposit() {
-  depositForm.value = { contractId: '', amount: '', remark: '' }
-  showDepositModal.value = true
-}
-
-async function saveDeposit() {
-  if (!depositForm.value.contractId) { showToast('请选择合同'); return }
-  if (!depositForm.value.amount) { showToast('请输入金额'); return }
-  const c = contracts.value.find(c => c.id === depositForm.value.contractId)
-  try {
-    await addDeposit({
-      contractId: depositForm.value.contractId,
-      propertyId: c.propertyId,
-      propertyName: c.propertyName,
-      tenantName: c.tenantName,
-      amount: Number(depositForm.value.amount),
-      remark: depositForm.value.remark,
-    })
-    showDepositModal.value = false
-    deposits.value = await getDeposits()
-    showToast('质保金已添加')
-  } catch(e) {
-    console.error(e)
-    showToast('操作失败')
-  }
-}
-
-async function releaseToRent(deposit) {
-  if (!confirm(`将「${deposit.tenantName}」的质保金 ¥${deposit.amount.toLocaleString()} 转为一期租金？`)) return
-  try {
-    await updateDeposit(deposit.id, { status: 'converted' })
-    deposits.value = await getDeposits()
-    showToast('已转为租金')
-  } catch(e) { console.error(e); showToast('操作失败') }
-}
-
-async function refundDeposit(deposit) {
-  if (!confirm(`确认退还「${deposit.tenantName}」的质保金 ¥${deposit.amount.toLocaleString()}？`)) return
-  try {
-    await updateDeposit(deposit.id, { status: 'refunded' })
-    deposits.value = await getDeposits()
-    showToast('已标记为已退')
-  } catch(e) { console.error(e); showToast('操作失败') }
-}
-
-async function delDeposit(deposit) {
-  if (!confirm(`确认删除？`)) return
-  try {
-    await deleteDeposit(deposit.id)
-    deposits.value = await getDeposits()
-    showToast('已删除')
-  } catch(e) { console.error(e); showToast('操作失败') }
-}
 
 function showToast(msg) {
   toast.value = msg
@@ -118,7 +62,6 @@ function showToast(msg) {
 
 const activeCount = computed(() => contracts.value.filter(c => c.status === 'active').length)
 const pendingCount = computed(() => bills.value.filter(b => b.status === 'pending').length)
-const depositCount = computed(() => deposits.value.filter(d => d.status === 'held').length)
 </script>
 
 <template>
@@ -172,78 +115,6 @@ const depositCount = computed(() => deposits.value.filter(d => d.status === 'hel
       </div>
     </div>
 
-    <!-- Security deposit section -->
-    <div class="section-title">🔐 质保金管理</div>
-
-    <div class="deposit-hero-card">
-      <div class="deposit-left">
-        <div class="deposit-icon-wrap">
-          <span style="font-size:28px">🔐</span>
-        </div>
-        <div>
-          <div class="deposit-count">{{ depositCount }}</div>
-          <div class="deposit-label">笔持有中</div>
-        </div>
-      </div>
-      <button class="btn btn-primary btn-sm" style="width:auto;padding:9px 18px" @click="openDeposit">
-        <span>＋</span> 添加质保金
-      </button>
-    </div>
-
-    <!-- Deposit list -->
-    <template v-if="loading">
-      <div v-for="i in 2" :key="i" class="deposit-skeleton">
-        <div class="skeleton" style="height:16px;width:50%;margin-bottom:8px;border-radius:6px"></div>
-        <div class="skeleton" style="height:12px;width:35%;border-radius:6px"></div>
-      </div>
-    </template>
-
-    <div v-else-if="deposits.length === 0" class="empty" style="padding:32px 0">
-      <div class="empty-icon">🔐</div>
-      <div class="empty-text">暂无质保金记录</div>
-    </div>
-
-    <div
-      v-for="(d, idx) in deposits"
-      :key="d.id"
-      class="deposit-card"
-      :style="{ animationDelay: idx * 50 + 'ms' }"
-    >
-      <div class="deposit-top">
-        <div class="deposit-info">
-          <div class="deposit-name-row">
-            <span class="deposit-name">{{ d.tenantName }}</span>
-            <span class="badge" :class="{
-              'badge-warning': d.status === 'held',
-              'badge-info': d.status === 'converted',
-              'badge-success': d.status === 'refunded'
-            }">
-              {{ d.status === 'held' ? '持有中' : d.status === 'converted' ? '已转租金' : '已退还' }}
-            </span>
-          </div>
-          <div class="deposit-meta">{{ d.propertyName }}</div>
-        </div>
-        <div class="deposit-amount">¥{{ d.amount.toLocaleString() }}</div>
-      </div>
-
-      <div class="deposit-actions" v-if="d.status === 'held'">
-        <button class="action-btn action-success" @click="releaseToRent(d)">
-          <span>💵</span> 转租金
-        </button>
-        <button class="action-btn action-danger" @click="refundDeposit(d)">
-          <span>↩️</span> 退还
-        </button>
-        <button class="action-btn action-secondary" @click="delDeposit(d)">
-          <span>🗑️</span> 删除
-        </button>
-      </div>
-      <div class="deposit-actions" v-else>
-        <button class="action-btn action-danger" @click="delDeposit(d)">
-          <span>🗑️</span> 删除记录
-        </button>
-      </div>
-    </div>
-
     <!-- Bills entry -->
     <div class="section-title" style="margin-top:24px">💰 全部账单</div>
 
@@ -278,36 +149,6 @@ const depositCount = computed(() => deposits.value.filter(d => d.status === 'hel
     <button class="btn btn-danger" style="margin-top:8px" @click="emit('logout')">
       <span>🚪</span> 退出登录
     </button>
-
-    <!-- Deposit modal -->
-    <div v-if="showDepositModal" class="modal-overlay" @click.self="showDepositModal=false">
-      <div class="modal-sheet">
-        <div class="modal-title">🔐 添加质保金</div>
-
-        <div class="input-group">
-          <label>选择合同 *</label>
-          <select class="input" v-model="depositForm.contractId">
-            <option value="">-- 请选择合同 --</option>
-            <option v-for="c in contracts.filter(x=>x.status==='active')" :key="c.id" :value="c.id">
-              {{ c.tenantName }} · {{ c.propertyName }}
-            </option>
-          </select>
-        </div>
-        <div class="input-group">
-          <label>金额 *</label>
-          <input v-model="depositForm.amount" class="input" type="number" placeholder="输入质保金金额" />
-        </div>
-        <div class="input-group">
-          <label>备注</label>
-          <input v-model="depositForm.remark" class="input" placeholder="可选备注" />
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showDepositModal=false">取消</button>
-          <button class="btn btn-primary" @click="saveDeposit">添加</button>
-        </div>
-      </div>
-    </div>
 
     <!-- Bills modal -->
     <div v-if="showBillsModal" class="modal-overlay" @click.self="showBillsModal=false">

@@ -11,6 +11,12 @@ const properties = ref([])
 const showPayModal = ref(false)
 const selectedBill = ref(null)
 const loading = ref(true)
+const toast = ref('')
+
+function showToast(msg) {
+  toast.value = msg
+  setTimeout(() => { toast.value = '' }, 2000)
+}
 
 onMounted(async () => {
   try {
@@ -26,13 +32,18 @@ onMounted(async () => {
 
 async function confirmPay() {
   if (!selectedBill.value) return
+  const billId = selectedBill.value.id
   try {
-    await payBill(selectedBill.value.id)
+    await payBill(billId)
     showPayModal.value = false
     selectedBill.value = null
-    [stats.value, bills.value] = await Promise.all([getStats(), getBills()])
+    const [newStats, newBills] = await Promise.all([getStats(), getBills()])
+    stats.value = newStats
+    bills.value = newBills
+    showToast('收款成功 ✓')
   } catch(e) {
     console.error(e)
+    showToast('操作失败')
   }
 }
 
@@ -70,7 +81,9 @@ function dueLabel(due) {
 }
 
 function formatAmount(n) {
-  return n ? n.toLocaleString() : '0'
+  if (!n) return '0'
+  const s = n.toLocaleString()
+  return s.length > 6 ? s : s // keep full number, CSS handles overflow
 }
 
 const activeContracts = computed(() => contracts.value.filter(c => c.status === 'active').length)
@@ -108,7 +121,7 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
     <template v-else>
       <div class="stat-grid">
         <div class="stat-card cyan">
-          <div class="stat-value">¥{{ formatAmount(stats.totalPending) }}</div>
+          <div class="stat-value" style="font-size:22px;letter-spacing:-1px;word-break:break-all">¥{{ formatAmount(stats.totalPending) }}</div>
           <div class="stat-label">待收总额</div>
           <div class="stat-trend trend-up">↑ 本月应收</div>
         </div>
@@ -269,6 +282,8 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
         </div>
       </div>
     </div>
+
+    <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
 </template>
 

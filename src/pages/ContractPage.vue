@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import {
   getContracts, getProperties, getBills, addContract, updateContract,
-  deleteContract, payBill, cycleText
+  deleteContract, payBill, unpayBill, endContract, cycleText
 } from '../store.js'
 
 const contracts = ref([])
@@ -42,7 +42,7 @@ const displayed = computed(() => contracts.value.filter(c => c.status === tab.va
 const contractBills = computed(() => {
   if (!selectedContract.value) return []
   return bills.value.filter(b => b.contractId === selectedContract.value.id)
-    .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
 })
 
 function formDefaults() {
@@ -125,6 +125,18 @@ async function del(c) {
   }
 }
 
+async function terminate(c) {
+  if (!confirm(`确认对「${c.tenantName}」执行退房？\n该合同下所有待付账单将自动取消。`)) return
+  try {
+    await endContract(c.id)
+    await refresh()
+    showToast('已退房')
+  } catch(e) {
+    console.error(e)
+    showToast('操作失败')
+  }
+}
+
 function viewDetail(c) {
   selectedContract.value = c
   showDetail.value = true
@@ -140,6 +152,17 @@ async function pay(billId) {
     await payBill(billId)
     bills.value = await getBills()
     showToast('已标记为已付')
+  } catch(e) {
+    console.error(e)
+    showToast('操作失败')
+  }
+}
+
+async function unpay(billId) {
+  try {
+    await unpayBill(billId)
+    bills.value = await getBills()
+    showToast('已撤销')
   } catch(e) {
     console.error(e)
     showToast('操作失败')
@@ -269,6 +292,9 @@ function statusBadge(c) {
         </button>
         <button class="action-btn action-danger" @click="del(c)">
           <span>🗑️</span> 删除
+        </button>
+        <button v-if="c.status === 'active'" class="action-btn action-warning" @click="terminate(c)">
+          <span>🚪</span> 退房
         </button>
       </div>
     </div>
@@ -407,12 +433,21 @@ function statusBadge(c) {
           </div>
           <div class="bill-item-right">
             <div class="bill-item-amount">¥{{ formatAmount(bill.amount) }}</div>
-            <span
-              class="badge"
-              :class="bill.status==='paid' ? 'badge-success' : 'badge-warning'"
-              style="cursor:pointer"
-              @click="bill.status!=='paid' && pay(bill.id)"
-            >{{ bill.status === 'paid' ? '已付 ✓' : '待付 ⟶' }}</span>
+            <div style="display:flex;gap:4px;align-items:center">
+              <span
+                v-if="bill.status!=='paid'"
+                class="badge badge-warning"
+                style="cursor:pointer"
+                @click="pay(bill.id)"
+              >待付 ⟶</span>
+              <span
+                v-else
+                class="badge badge-success"
+                style="cursor:pointer"
+                @click="unpay(bill.id)"
+                title="点击撤销"
+              >已付 ✓</span>
+            </div>
           </div>
         </div>
 
@@ -583,6 +618,7 @@ function statusBadge(c) {
 .action-secondary:hover { background: rgba(255,255,255,0.06); border-color: var(--border-accent); color: var(--text-primary); }
 .action-info:hover { background: var(--accent-dim); border-color: var(--border-accent); color: var(--accent); }
 .action-danger:hover { background: var(--danger-dim); border-color: rgba(255,69,96,0.3); color: var(--danger); }
+.action-warning:hover { background: var(--warning-dim); border-color: rgba(245,158,11,0.3); color: var(--warning); }
 
 /* Detail card */
 .detail-card {
