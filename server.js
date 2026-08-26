@@ -252,12 +252,25 @@ app.post('/api/contracts', auth, (req, res) => {
 
 app.post('/api/contracts/:id', auth, (req, res) => {
   try {
+    const existing = db.prepare('SELECT * FROM rent_contracts WHERE id=?').get(req.params.id)
+    if (!existing) return fail(res, 404, 'Contract not found')
     const { propertyId, propertyName, tenantName, tenantPhone, rentAmount, depositAmount,
             paymentCycle, startDate, endDate, status } = req.body
     db.prepare(`UPDATE rent_contracts SET propertyId=?, propertyName=?, tenantName=?, tenantPhone=?,
       rentAmount=?, depositAmount=?, paymentCycle=?, startDate=?, endDate=?, status=? WHERE id=?`)
-      .run(propertyId, propertyName, tenantName, tenantPhone || '', rentAmount, depositAmount || 0,
-        paymentCycle, startDate, endDate, status || 'active', req.params.id)
+      .run(
+        propertyId ?? existing.propertyId,
+        propertyName ?? existing.propertyName,
+        tenantName ?? existing.tenantName,
+        tenantPhone ?? existing.tenantPhone,
+        rentAmount ?? existing.rentAmount,
+        depositAmount ?? existing.depositAmount,
+        paymentCycle ?? existing.paymentCycle,
+        startDate ?? existing.startDate,
+        endDate ?? existing.endDate,
+        status ?? existing.status,
+        req.params.id
+      )
     ok(res, db.prepare('SELECT * FROM rent_contracts WHERE id=?').get(req.params.id))
   } catch (e) { fail(res, 500, e.message) }
 })
