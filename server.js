@@ -20,7 +20,7 @@ app.use(express.json())
 const dbPath = join(__dirname, 'rent_reminder.db')
 const db = new Database(dbPath)
 
-// Create tables
+// Create tables (receivedAmount added 2026-08-27 for partial payment support)
 db.exec(`
   CREATE TABLE IF NOT EXISTS rent_users (
     id TEXT PRIMARY KEY,
@@ -64,6 +64,7 @@ db.exec(`
     type TEXT DEFAULT 'rent',
     status TEXT DEFAULT 'pending',
     paidAt TEXT DEFAULT '',
+    receivedAmount REAL DEFAULT 0,
     createdAt TEXT DEFAULT ''
   );
 
@@ -79,6 +80,11 @@ db.exec(`
     createdAt TEXT DEFAULT ''
   );
 `)
+
+// 增量升级：已建库可能缺少 receivedAmount 列
+try {
+  db.exec("ALTER TABLE rent_bills ADD COLUMN receivedAmount REAL DEFAULT 0")
+} catch (e) { /* column already exists */ }
 
 // Seed default admin
 const adminExists = db.prepare('SELECT id FROM rent_users WHERE role=?').get('admin')
@@ -314,16 +320,27 @@ app.post('/api/bills', auth, (req, res) => {
 
 app.post('/api/bills/:id/pay', auth, (req, res) => {
   try {
+    const { receivedAmount } = req.body
     const paidAt = new Date().toISOString()
-    db.prepare("UPDATE rent_bills SET status='paid', paidAt=? WHERE id=?")
-      .run(paidAt, req.params.id)
+    const bill = db.prepare('SELECT * FROM rent_bills WHERE id=?').get(req.params.id)
+    if (!bill) { fail(res, 404, 'Bill not found'); return }
+    // 支持部分收款：receivedAmount < bill.amount 时只更新 receivedAmount，状态保持 pending
+    if (receivedAmount !== undefined && receivedAmount !== null && receivedAmount < bill.amount) {
+      db.prepare("UPDATE rent_bills SET receivedAmount=?, paidAt=? WHERE id=?")
+        .run(receivedAmount, paidAt, req.params.id)
+    } else {
+      // 全额付款（含传了全额 receivedAmount 或未传）
+      const fullAmount = receivedAmount !== undefined ? receivedAmount : bill.amount
+      db.prepare("UPDATE rent_bills SET status='paid', receivedAmount=?, paidAt=? WHERE id=?")
+        .run(fullAmount, paidAt, req.params.id)
+    }
     ok(res, db.prepare('SELECT * FROM rent_bills WHERE id=?').get(req.params.id))
   } catch (e) { fail(res, 500, e.message) }
 })
 
 app.post('/api/bills/:id/unpay', auth, (req, res) => {
   try {
-    db.prepare("UPDATE rent_bills SET status='pending', paidAt=NULL WHERE id=?")
+    db.prepare("UPDATE rent_bills SET status='pending', paidAt=NULL, receivedAmount=0 WHERE id=?")
       .run(req.params.id)
     ok(res, db.prepare('SELECT * FROM rent_bills WHERE id=?').get(req.params.id))
   } catch (e) { fail(res, 500, e.message) }
@@ -411,16 +428,106 @@ app.get('/api/stats', auth, (req, res) => {
     const deposits = db.prepare("SELECT * FROM rent_deposits WHERE status='held'").all()
     const now = new Date()
     const today = now.toISOString().slice(0, 10)
+    const currentYear = now.getFullYear()
+    const currentMonth = now.getMonth() // 0-indexed
+
+    // 按时间范围过滤本月账单（按 dueDate 所在月计算）
+    const thisMonthBills = bills.filter(b => {
+      if (!b.dueDate) return false
+      const d = new Date(b.dueDate)
+      return d.getFullYear() === currentYear && d.getMonth() === currentMonth
+    })
+
+    // 待收：pending 且未全额收款（receivedAmount=0 或 < amount）
     const pending = bills.filter(b => b.status === 'pending')
     const overdue = pending.filter(b => b.dueDate < today && b.type === 'rent')
     const upcoming = pending.filter(b => b.dueDate >= today && b.type === 'rent')
+
+    // 本月实收：已付账单（paid）+ 部分收款账单（receivedAmount > 0）
+    // 逻辑：paid 账单按 full amount 算；partial 账单按 receivedAmount 算
+    const thisMonthReceived = thisMonthBills
+      .filter(b => b.status === 'paid' || (b.receivedAmount > 0))
+      .reduce((s, b) => s + (b.status === 'paid' ? b.amount : b.receivedAmount), 0)
+
+    // 累计实收
+    const totalReceived = bills
+      .filter(b => b.status === 'paid' || b.receivedAmount > 0)
+      .reduce((s, b) => s + (b.status === 'paid' ? b.amount : b.receivedAmount), 0)
+
     const totalPending = pending.reduce((s, b) => s + b.amount, 0)
     const totalOverdue = overdue.reduce((s, b) => s + b.amount, 0)
     const totalDeposit = deposits.reduce((s, d) => s + d.amount, 0)
     const weekFromNow = new Date(now); weekFromNow.setDate(weekFromNow.getDate() + 7)
     const dueThisWeek = upcoming.filter(b => b.dueDate <= weekFromNow.toISOString().slice(0, 10)).length
-    ok(res, { totalPending, totalOverdue, totalDeposit, pendingCount: pending.length,
-      overdueCount: overdue.length, upcomingCount: upcoming.length, dueThisWeek, activeCount: contracts.length })
+    ok(res, {
+      totalPending, totalOverdue, totalDeposit, pendingCount: pending.length,
+      overdueCount: overdue.length, upcomingCount: upcoming.length, dueThisWeek,
+      activeCount: contracts.length,
+      monthlyReceived: thisMonthReceived,
+      totalReceived
+    })
+  } catch (e) { fail(res, 500, e.message) }
+})
+
+// GET /api/properties/income-stats  ── 按房屋统计收益
+app.get('/api/properties/income-stats', auth, (req, res) => {
+  try {
+    const { from, to } = req.query
+    const bills = db.prepare('SELECT * FROM rent_bills').all()
+    const properties = db.prepare('SELECT * FROM rent_properties').all()
+
+    // 如果指定了时间范围（from=YYYY-MM-DD, to=YYYY-MM-DD）
+    const filtered = (from && to)
+      ? bills.filter(b => b.dueDate >= from && b.dueDate <= to)
+      : bills
+
+    // 按 propertyId 汇总
+    const byProperty = {}
+    for (const p of properties) {
+      byProperty[p.id] = {
+        propertyId: p.id,
+        propertyName: p.name,
+        address: p.address,
+        totalBills: 0,
+        totalAmount: 0,       // 账单总额
+        totalReceived: 0,     // 实收总额（paid全额 + partial部分）
+        pendingAmount: 0,      // 待收余额
+        paidCount: 0,
+        partialCount: 0,
+        pendingCount: 0
+      }
+    }
+
+    for (const b of filtered) {
+      if (!byProperty[b.propertyId]) continue
+      const s = byProperty[b.propertyId]
+      s.totalBills++
+      s.totalAmount += b.amount
+      if (b.status === 'paid') {
+        s.totalReceived += b.amount
+        s.paidCount++
+      } else if (b.receivedAmount > 0) {
+        s.totalReceived += b.receivedAmount
+        s.pendingAmount += (b.amount - b.receivedAmount)
+        s.partialCount++
+      } else {
+        s.pendingAmount += b.amount
+        s.pendingCount++
+      }
+    }
+
+    const list = Object.values(byProperty).map(p => ({
+      ...p,
+      pendingAmount: Math.round(p.pendingAmount * 100) / 100,
+      totalReceived: Math.round(p.totalReceived * 100) / 100
+    }))
+
+    // 全局汇总
+    const grandTotal = list.reduce((s, p) => s + p.totalAmount, 0)
+    const grandReceived = list.reduce((s, p) => s + p.totalReceived, 0)
+    const grandPending = list.reduce((s, p) => s + p.pendingAmount, 0)
+
+    ok(res, { properties: list, summary: { totalAmount: grandTotal, totalReceived: grandReceived, totalPending: grandPending } })
   } catch (e) { fail(res, 500, e.message) }
 })
 
