@@ -12,6 +12,12 @@ import { getUser, logout } from './store.js'
 const user = ref(getUser())
 const currentTab = ref('home')
 const showAdmin = ref(false)
+const authExpired = ref(false)
+
+window.addEventListener('rent-auth-expired', () => {
+  authExpired.value = true
+  onLogout()
+})
 
 function onLoginSuccess(data) {
   user.value = { username: data.username, role: data.role }
@@ -34,8 +40,13 @@ const tabs = [
 </script>
 
 <template>
+  <!-- Auth expired notice -->
+  <div v-if="authExpired" style="text-align:center;padding:20px;color:#e74c3c;font-size:14px">
+    登录已过期，请重新登录
+  </div>
+
   <!-- Not logged in -->
-  <LoginPage v-if="!user" @login-success="onLoginSuccess" />
+  <LoginPage v-else-if="!user" @login-success="onLoginSuccess" />
 
   <!-- Admin panel -->
   <AdminPage v-else-if="showAdmin" @back="showAdmin = false" :user="user" @logout="onLogout" />
