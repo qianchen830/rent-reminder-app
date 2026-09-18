@@ -9,7 +9,6 @@ export function logout() { setToken(''); setUser(null) }
 
 async function get(path) {
   const r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + _token } })
-  if (r.status === 401) { window.dispatchEvent(new Event('rent-auth-expired')); logout(); throw new Error('登录已过期，请重新登录') }
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data
@@ -20,14 +19,12 @@ async function post(path, body = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + _token },
     body: JSON.stringify(body)
   })
-  if (r.status === 401) { window.dispatchEvent(new Event('rent-auth-expired')); logout(); throw new Error('登录已过期，请重新登录') }
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data
 }
 async function del(path) {
   const r = await fetch(API + path, { method: 'DELETE', headers: { Authorization: 'Bearer ' + _token } })
-  if (r.status === 401) { window.dispatchEvent(new Event('rent-auth-expired')); logout(); throw new Error('登录已过期，请重新登录') }
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data
@@ -38,7 +35,6 @@ async function put(path, body = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + _token },
     body: JSON.stringify(body)
   })
-  if (r.status === 401) { window.dispatchEvent(new Event('rent-auth-expired')); logout(); throw new Error('登录已过期，请重新登录') }
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data
@@ -80,18 +76,26 @@ export async function endContract(id) { return await post(`/contracts/${id}/end`
 // Bills
 export async function getBills() { return await get('/bills') }
 export async function addBill(data) { return await post('/bills', data) }
-export async function payBill(id) { return await post(`/bills/${id}/pay`, {}) }
+export async function payBill(id, { receivedAmount, amount, paidDate } = {}) { return await post(`/bills/${id}/pay`, { receivedAmount, amount, paidDate }) }
 export async function unpayBill(id) { return await post(`/bills/${id}/unpay`, {}) }
 
 // Stats
 export async function getStats() { return await get('/stats') }
 
 // Deposits
-export async function getDeposits() { return await get('/deposits') }
+// Deposit sync version (incremented when deposits change)
+let _depositVersion = 0
+export function getDepositVersion() { return _depositVersion }
+export function incDepositVersion() { _depositVersion++ }
+
+export async function getDeposits() {
+  const data = await get('/deposits')
+  return data
+}
 export async function addDeposit(data) { return await post('/deposits', data) }
+export async function convertDeposit(depositId, billId) { return await post('/deposits/' + depositId + '/convert', { billId }) }
 export async function updateDeposit(id, data) { return await post(`/deposits/${id}`, data) }
 export async function deleteDeposit(id) { return await del(`/deposits/${id}`) }
-export async function convertDeposit(id, billId) { return await post(`/deposits/${id}/convert`, { billId }) }
 
 // Init sample
 export async function initSample() { return await post('/init-sample') }

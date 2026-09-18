@@ -1,9 +1,11 @@
 <script setup>
+console.log("CONTRACT_PAGE_LOADED_MAGIC")
 import { ref, computed, onMounted } from 'vue'
 import {
   getContracts, getProperties, getBills, addContract, updateContract,
   deleteContract, payBill, unpayBill, endContract, cycleText
 } from '../store.js'
+import PayModal from '../components/PayModal.vue'
 
 const contracts = ref([])
 const properties = ref([])
@@ -16,6 +18,8 @@ const selectedContract = ref(null)
 const tab = ref('active')
 const toast = ref('')
 const loading = ref(true)
+const showPayModal = ref(false)
+const selectedBill = ref(null)
 
 onMounted(async () => {
   try {
@@ -42,7 +46,7 @@ const displayed = computed(() => contracts.value.filter(c => c.status === tab.va
 const contractBills = computed(() => {
   if (!selectedContract.value) return []
   return bills.value.filter(b => b.contractId === selectedContract.value.id)
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
 })
 
 function formDefaults() {
@@ -52,7 +56,6 @@ function formDefaults() {
     tenantName: '',
     tenantPhone: '',
     rentAmount: '',
-    depositAmount: '',
     paymentCycle: 'monthly',
     startDate: '',
     endDate: '',
@@ -63,7 +66,13 @@ const form = ref(formDefaults())
 
 function openAdd() {
   editing.value = null
+  const prev = form.value
   form.value = formDefaults()
+  // Keep property if modal was already open
+  if (prev.propertyId) {
+    form.value.propertyId = prev.propertyId
+    form.value.propertyName = prev.propertyName
+  }
   showModal.value = true
 }
 
@@ -75,7 +84,6 @@ function openEdit(c) {
     tenantName: c.tenantName,
     tenantPhone: c.tenantPhone || '',
     rentAmount: c.rentAmount,
-    depositAmount: c.depositAmount,
     paymentCycle: c.paymentCycle,
     startDate: c.startDate,
     endDate: c.endDate,
@@ -85,7 +93,10 @@ function openEdit(c) {
 
 function onPropertyChange(e) {
   const p = properties.value.find(p => p.id === e.target.value)
-  if (p) form.value.propertyName = p.name
+  if (p) {
+    form.value.propertyId = p.id
+    form.value.propertyName = p.name
+  }
 }
 
 async function save() {
@@ -96,7 +107,7 @@ async function save() {
   if (!f.startDate || !f.endDate) { showToast('请选择租期'); return }
   if (new Date(f.endDate) <= new Date(f.startDate)) { showToast('结束日期必须晚于开始日期'); return }
 
-  const data = { ...f, rentAmount: Number(f.rentAmount), depositAmount: Number(f.depositAmount) || 0 }
+  const data = { ...f, rentAmount: Number(f.rentAmount) }
   try {
     if (editing.value) {
       await updateContract(editing.value.id, data)
@@ -147,11 +158,20 @@ function viewBills(c) {
   showBillList.value = true
 }
 
-async function pay(billId) {
+function pay(billId) {
+  const bill = bills.value.find(b => b.id === billId)
+  if (!bill) return
+  selectedBill.value = bill
+  showPayModal.value = true
+}
+
+async function confirmPay({ receivedAmount, paidDate }) {
   try {
-    await payBill(billId)
+    await payBill(selectedBill.value.id, { receivedAmount, paidDate })
     bills.value = await getBills()
-    showToast('已标记为已付')
+    showPayModal.value = false
+    showToast('收款成功 ✓')
+    selectedBill.value = null
   } catch(e) {
     console.error(e)
     showToast('操作失败')
@@ -328,10 +348,6 @@ function statusBadge(c) {
             <label>月租金 *</label>
             <input v-model="form.rentAmount" class="input" type="number" placeholder="0" />
           </div>
-          <div class="input-group">
-            <label>质保金</label>
-            <input v-model="form.depositAmount" class="input" type="number" placeholder="0" />
-          </div>
         </div>
 
         <div class="input-group">
@@ -390,8 +406,6 @@ function statusBadge(c) {
               <span class="detail-val accent">¥{{ formatAmount(selectedContract.rentAmount) }}</span>
             </div>
             <div class="detail-row">
-              <span class="detail-label">质保金</span>
-              <span class="detail-val">¥{{ formatAmount(selectedContract.depositAmount) }}</span>
             </div>
             <div class="detail-row">
               <span class="detail-label">付款方式</span>
@@ -432,26 +446,34 @@ function statusBadge(c) {
             <div class="bill-item-date">到期：{{ bill.dueDate }}</div>
           </div>
           <div class="bill-item-right">
-            <div class="bill-item-amount">¥{{ formatAmount(bill.amount) }}</div>
-            <div style="display:flex;gap:4px;align-items:center">
+            <div class="bill-item-amount">
+              <div v-if="(bill.receivedAmount || 0) > 0" style="font-size:12px;color:var(--text-muted);font-weight:400">
+                已收¥{{ bill.receivedAmount.toLocaleString() }} | 待收¥{{ (bill.amount - bill.receivedAmount).toLocaleString() }}
+              </div>
+              <div :style="{ color: (bill.receivedAmount || 0) > 0 ? 'var(--accent)' : 'inherit', fontWeight: 800 }">
+                ¥{{ bill.amount.toLocaleString() }}
+              </div>
+            </div>
+            <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
               <span
-                v-if="bill.status!=='paid'"
-                class="badge badge-warning"
+                class="badge"
+                :class="bill.status!=='paid' ? 'badge-warning' : 'badge-success'"
                 style="cursor:pointer"
                 @click="pay(bill.id)"
-              >待付 ⟶</span>
-              <span
-                v-else
-                class="badge badge-success"
-                style="cursor:pointer"
-                @click="unpay(bill.id)"
-                title="点击撤销"
-              >已付 ✓</span>
+              >{{ bill.status!=='paid' ? '待付 ⟶' : '已付 ✓' }}</span>
             </div>
           </div>
         </div>
 
         <button class="btn btn-secondary" style="margin-top:16px" @click="showBillList=false">关闭</button>
+
+        <PayModal
+          v-if="showPayModal"
+          :bill="selectedBill"
+          :isEdit="(selectedBill.receivedAmount || 0) > 0"
+          @close="showPayModal = false"
+          @confirm="confirmPay"
+        />
       </div>
     </div>
 

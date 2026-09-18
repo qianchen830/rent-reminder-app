@@ -20,7 +20,7 @@ app.use(express.json())
 const dbPath = join(__dirname, 'rent_reminder.db')
 const db = new Database(dbPath)
 
-// Create tables (receivedAmount added 2026-08-27 for partial payment support)
+// Create tables
 db.exec(`
   CREATE TABLE IF NOT EXISTS rent_users (
     id TEXT PRIMARY KEY,
@@ -45,7 +45,6 @@ db.exec(`
     tenantName TEXT NOT NULL,
     tenantPhone TEXT DEFAULT '',
     rentAmount REAL NOT NULL,
-    depositAmount REAL DEFAULT 0,
     paymentCycle TEXT DEFAULT 'monthly',
     startDate TEXT NOT NULL,
     endDate TEXT NOT NULL,
@@ -64,7 +63,6 @@ db.exec(`
     type TEXT DEFAULT 'rent',
     status TEXT DEFAULT 'pending',
     paidAt TEXT DEFAULT '',
-    receivedAmount REAL DEFAULT 0,
     createdAt TEXT DEFAULT ''
   );
 
@@ -80,11 +78,6 @@ db.exec(`
     createdAt TEXT DEFAULT ''
   );
 `)
-
-// 增量升级：已建库可能缺少 receivedAmount 列
-try {
-  db.exec("ALTER TABLE rent_bills ADD COLUMN receivedAmount REAL DEFAULT 0")
-} catch (e) { /* column already exists */ }
 
 // Seed default admin
 const adminExists = db.prepare('SELECT id FROM rent_users WHERE role=?').get('admin')
@@ -241,17 +234,18 @@ app.get('/api/contracts', auth, (req, res) => {
 
 app.post('/api/contracts', auth, (req, res) => {
   try {
-    const { propertyId, propertyName, tenantName, tenantPhone = '', rentAmount, depositAmount = 0,
+    const { propertyId, propertyName, tenantName, tenantPhone = '', rentAmount,
             paymentCycle = 'monthly', startDate, endDate } = req.body
     if (!propertyId || !tenantName || !rentAmount || !startDate || !endDate)
       return fail(res, 400, 'Missing required fields')
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
     const createdAt = new Date().toISOString()
     db.prepare(`INSERT INTO rent_contracts
-      (id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, depositAmount, paymentCycle, startDate, endDate, status, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
-      .run(id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, depositAmount, paymentCycle, startDate, endDate, createdAt)
-    generateBills(db, id, propertyId, propertyName, tenantName, rentAmount, depositAmount, paymentCycle, startDate, endDate)
+      (id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, paymentCycle, startDate, endDate, status, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
+      .run(id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, paymentCycle, startDate, endDate, createdAt)
+    generateBills(db, id, propertyId, propertyName, tenantName, rentAmount, paymentCycle, startDate, endDate)
+
     ok(res, db.prepare('SELECT * FROM rent_contracts WHERE id=?').get(id))
   } catch (e) { fail(res, 500, e.message) }
 })
@@ -260,17 +254,16 @@ app.post('/api/contracts/:id', auth, (req, res) => {
   try {
     const existing = db.prepare('SELECT * FROM rent_contracts WHERE id=?').get(req.params.id)
     if (!existing) return fail(res, 404, 'Contract not found')
-    const { propertyId, propertyName, tenantName, tenantPhone, rentAmount, depositAmount,
+    const { propertyId, propertyName, tenantName, tenantPhone, rentAmount,
             paymentCycle, startDate, endDate, status } = req.body
     db.prepare(`UPDATE rent_contracts SET propertyId=?, propertyName=?, tenantName=?, tenantPhone=?,
-      rentAmount=?, depositAmount=?, paymentCycle=?, startDate=?, endDate=?, status=? WHERE id=?`)
+      rentAmount=?, paymentCycle=?, startDate=?, endDate=?, status=? WHERE id=?`)
       .run(
         propertyId ?? existing.propertyId,
         propertyName ?? existing.propertyName,
         tenantName ?? existing.tenantName,
         tenantPhone ?? existing.tenantPhone,
         rentAmount ?? existing.rentAmount,
-        depositAmount ?? existing.depositAmount,
         paymentCycle ?? existing.paymentCycle,
         startDate ?? existing.startDate,
         endDate ?? existing.endDate,
@@ -320,19 +313,18 @@ app.post('/api/bills', auth, (req, res) => {
 
 app.post('/api/bills/:id/pay', auth, (req, res) => {
   try {
-    const { receivedAmount } = req.body
-    const paidAt = new Date().toISOString()
-    const bill = db.prepare('SELECT * FROM rent_bills WHERE id=?').get(req.params.id)
-    if (!bill) { fail(res, 404, 'Bill not found'); return }
-    // 支持部分收款：receivedAmount < bill.amount 时只更新 receivedAmount，状态保持 pending
-    if (receivedAmount !== undefined && receivedAmount !== null && receivedAmount < bill.amount) {
-      db.prepare("UPDATE rent_bills SET receivedAmount=?, paidAt=? WHERE id=?")
-        .run(receivedAmount, paidAt, req.params.id)
-    } else {
-      // 全额付款（含传了全额 receivedAmount 或未传）
-      const fullAmount = receivedAmount !== undefined ? receivedAmount : bill.amount
-      db.prepare("UPDATE rent_bills SET status='paid', receivedAmount=?, paidAt=? WHERE id=?")
-        .run(fullAmount, paidAt, req.params.id)
+    const { receivedAmount, amount, paidDate } = req.body || {}
+    // paidDate 可自定义，默认为当天
+    const paidAt = paidDate ? new Date(paidDate + 'T00:00:00.000Z').toISOString() : new Date().toISOString()
+    if (amount !== undefined && amount !== null) {
+      db.prepare("UPDATE rent_bills SET amount=? WHERE id=?").run(amount, req.params.id)
+    }
+    if (receivedAmount !== undefined && receivedAmount !== null) {
+      const currentAmount = amount !== undefined ? amount : db.prepare('SELECT amount FROM rent_bills WHERE id=?').get(req.params.id).amount
+      const status = receivedAmount >= currentAmount ? 'paid' : 'pending'
+      const finalPaidAt = status === 'paid' ? paidAt : null
+      db.prepare("UPDATE rent_bills SET status=?, paidAt=?, receivedAmount=? WHERE id=?")
+        .run(status, finalPaidAt, receivedAmount, req.params.id)
     }
     ok(res, db.prepare('SELECT * FROM rent_bills WHERE id=?').get(req.params.id))
   } catch (e) { fail(res, 500, e.message) }
@@ -340,7 +332,7 @@ app.post('/api/bills/:id/pay', auth, (req, res) => {
 
 app.post('/api/bills/:id/unpay', auth, (req, res) => {
   try {
-    db.prepare("UPDATE rent_bills SET status='pending', paidAt=NULL, receivedAmount=0 WHERE id=?")
+    db.prepare("UPDATE rent_bills SET status='pending', paidAt=NULL WHERE id=?")
       .run(req.params.id)
     ok(res, db.prepare('SELECT * FROM rent_bills WHERE id=?').get(req.params.id))
   } catch (e) { fail(res, 500, e.message) }
@@ -350,6 +342,15 @@ app.post('/api/bills/:id/unpay', auth, (req, res) => {
 app.get('/api/deposits', auth, (req, res) => {
   try {
     ok(res, db.prepare('SELECT * FROM rent_deposits ORDER BY createdAt DESC').all())
+  } catch (e) { fail(res, 500, e.message) }
+})
+
+// 问题2: 从合同添加质保金（合同录入时同步创建质保金记录）
+app.get('/api/deposits/from-contract/:contractId', auth, (req, res) => {
+  try {
+    const { contractId } = req.params
+    const deposits = db.prepare('SELECT * FROM rent_deposits WHERE contractId=? ORDER BY createdAt DESC').all(contractId)
+    ok(res, deposits)
   } catch (e) { fail(res, 500, e.message) }
 })
 
@@ -379,16 +380,18 @@ app.post('/api/deposits/:id/convert', auth, (req, res) => {
     if (!bill) { fail(res, 404, 'Bill not found or already paid'); return }
     if (bill.contractId !== deposit.contractId) { fail(res, 400, 'Bill does not belong to this deposit contract'); return }
 
-    const newBillAmount = Math.max(0, bill.amount - deposit.amount)
-    const newBillStatus = newBillAmount === 0 ? 'paid' : 'pending'
-    const paidAt = newBillStatus === 'paid' ? new Date().toISOString() : null
-    const depositRemark = `抵扣「${bill.tenantName}」${bill.dueDate}账单，原金额¥${bill.amount}，剩余¥${newBillAmount === 0 ? 0 : newBillAmount}`
+    // 转租金：把 deposit amount 填入账单的 receivedAmount，标记已付
+    const paidAt = new Date().toISOString()
+    const depositRemark = `质保金转租金：抵扣「${bill.tenantName}」${bill.dueDate}账单，¥${deposit.amount}`
 
     const savepoint = `sp_${Date.now()}`
     db.exec(`SAVEPOINT ${savepoint}`)
     try {
-      db.prepare('UPDATE rent_bills SET amount=?, status=?, paidAt=? WHERE id=?')
-        .run(newBillAmount, newBillStatus, paidAt, billId)
+      const newReceived = (bill.receivedAmount || 0) + deposit.amount
+      const remaining = bill.amount - newReceived
+      const newStatus = remaining <= 0 ? 'paid' : 'pending'
+      db.prepare("UPDATE rent_bills SET status=?, paidAt=?, receivedAmount=? WHERE id=?")
+        .run(newStatus, newStatus === 'paid' ? paidAt : null, newReceived, billId)
       db.prepare("UPDATE rent_deposits SET status='converted', remark=? WHERE id=?")
         .run(depositRemark, req.params.id)
       db.exec(`RELEASE SAVEPOINT ${savepoint}`)
@@ -427,107 +430,20 @@ app.get('/api/stats', auth, (req, res) => {
     const contracts = db.prepare("SELECT * FROM rent_contracts WHERE status='active'").all()
     const deposits = db.prepare("SELECT * FROM rent_deposits WHERE status='held'").all()
     const now = new Date()
+    const yyyy = now.getFullYear()
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const thisMonth = `${yyyy}-${mm}`
     const today = now.toISOString().slice(0, 10)
-    const currentYear = now.getFullYear()
-    const currentMonth = now.getMonth() // 0-indexed
-
-    // 按时间范围过滤本月账单（按 dueDate 所在月计算）
-    const thisMonthBills = bills.filter(b => {
-      if (!b.dueDate) return false
-      const d = new Date(b.dueDate)
-      return d.getFullYear() === currentYear && d.getMonth() === currentMonth
-    })
-
-    // 待收：pending 且未全额收款（receivedAmount=0 或 < amount）
-    const pending = bills.filter(b => b.status === 'pending')
-    const overdue = pending.filter(b => b.dueDate < today && b.type === 'rent')
-    const upcoming = pending.filter(b => b.dueDate >= today && b.type === 'rent')
-
-    // 本月实收：已付账单（paid）+ 部分收款账单（receivedAmount > 0）
-    // 逻辑：paid 账单按 full amount 算；partial 账单按 receivedAmount 算
-    const thisMonthReceived = thisMonthBills
-      .filter(b => b.status === 'paid' || (b.receivedAmount > 0))
-      .reduce((s, b) => s + (b.status === 'paid' ? b.amount : b.receivedAmount), 0)
-
-    // 累计实收
-    const totalReceived = bills
-      .filter(b => b.status === 'paid' || b.receivedAmount > 0)
-      .reduce((s, b) => s + (b.status === 'paid' ? b.amount : b.receivedAmount), 0)
-
-    const totalPending = pending.reduce((s, b) => s + b.amount, 0)
-    const totalOverdue = overdue.reduce((s, b) => s + b.amount, 0)
+    const pending = bills.filter(b => b.status === 'pending' && b.type === 'rent' && b.dueDate.slice(0, 7) === thisMonth)
+    const overdue = pending.filter(b => b.dueDate < today)
+    const upcoming = pending.filter(b => b.dueDate >= today)
+    const totalPending = pending.reduce((s, b) => s + Math.max(0, (b.amount || 0) - (b.receivedAmount || 0)), 0)
+    const totalOverdue = overdue.reduce((s, b) => s + Math.max(0, (b.amount || 0) - (b.receivedAmount || 0)), 0)
     const totalDeposit = deposits.reduce((s, d) => s + d.amount, 0)
     const weekFromNow = new Date(now); weekFromNow.setDate(weekFromNow.getDate() + 7)
     const dueThisWeek = upcoming.filter(b => b.dueDate <= weekFromNow.toISOString().slice(0, 10)).length
-    ok(res, {
-      totalPending, totalOverdue, totalDeposit, pendingCount: pending.length,
-      overdueCount: overdue.length, upcomingCount: upcoming.length, dueThisWeek,
-      activeCount: contracts.length,
-      monthlyReceived: thisMonthReceived,
-      totalReceived
-    })
-  } catch (e) { fail(res, 500, e.message) }
-})
-
-// GET /api/properties/income-stats  ── 按房屋统计收益
-app.get('/api/properties/income-stats', auth, (req, res) => {
-  try {
-    const { from, to } = req.query
-    const bills = db.prepare('SELECT * FROM rent_bills').all()
-    const properties = db.prepare('SELECT * FROM rent_properties').all()
-
-    // 如果指定了时间范围（from=YYYY-MM-DD, to=YYYY-MM-DD）
-    const filtered = (from && to)
-      ? bills.filter(b => b.dueDate >= from && b.dueDate <= to)
-      : bills
-
-    // 按 propertyId 汇总
-    const byProperty = {}
-    for (const p of properties) {
-      byProperty[p.id] = {
-        propertyId: p.id,
-        propertyName: p.name,
-        address: p.address,
-        totalBills: 0,
-        totalAmount: 0,       // 账单总额
-        totalReceived: 0,     // 实收总额（paid全额 + partial部分）
-        pendingAmount: 0,      // 待收余额
-        paidCount: 0,
-        partialCount: 0,
-        pendingCount: 0
-      }
-    }
-
-    for (const b of filtered) {
-      if (!byProperty[b.propertyId]) continue
-      const s = byProperty[b.propertyId]
-      s.totalBills++
-      s.totalAmount += b.amount
-      if (b.status === 'paid') {
-        s.totalReceived += b.amount
-        s.paidCount++
-      } else if (b.receivedAmount > 0) {
-        s.totalReceived += b.receivedAmount
-        s.pendingAmount += (b.amount - b.receivedAmount)
-        s.partialCount++
-      } else {
-        s.pendingAmount += b.amount
-        s.pendingCount++
-      }
-    }
-
-    const list = Object.values(byProperty).map(p => ({
-      ...p,
-      pendingAmount: Math.round(p.pendingAmount * 100) / 100,
-      totalReceived: Math.round(p.totalReceived * 100) / 100
-    }))
-
-    // 全局汇总
-    const grandTotal = list.reduce((s, p) => s + p.totalAmount, 0)
-    const grandReceived = list.reduce((s, p) => s + p.totalReceived, 0)
-    const grandPending = list.reduce((s, p) => s + p.pendingAmount, 0)
-
-    ok(res, { properties: list, summary: { totalAmount: grandTotal, totalReceived: grandReceived, totalPending: grandPending } })
+    ok(res, { totalPending, totalOverdue, totalDeposit, pendingCount: pending.length,
+      overdueCount: overdue.length, upcomingCount: upcoming.length, dueThisWeek, activeCount: contracts.length })
   } catch (e) { fail(res, 500, e.message) }
 })
 
@@ -545,19 +461,20 @@ app.post('/api/init-sample', auth, (req, res) => {
       .run(p2id, '示例房源-B', '重庆市江北区', '', now)
     const c1id = Date.now().toString(36) + 'c1'
     const c2id = Date.now().toString(36) + 'c2'
-    db.prepare(`INSERT INTO rent_contracts (id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, depositAmount, paymentCycle, startDate, endDate, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
-      .run(c1id, p1id, '示例房源-A', '李明', '13812345678', 3500, 7000, 'quarterly', '2025-01-01', '2025-12-31', now)
-    db.prepare(`INSERT INTO rent_contracts (id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, depositAmount, paymentCycle, startDate, endDate, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
-      .run(c2id, p2id, '示例房源-B', '王芳', '13987654321', 4200, 8400, 'monthly', '2025-03-01', '2026-02-28', now)
-    generateBills(db, c1id, p1id, '示例房源-A', '李明', 3500, 7000, 'quarterly', '2025-01-01', '2025-12-31')
-    generateBills(db, c2id, p2id, '示例房源-B', '王芳', 4200, 8400, 'monthly', '2025-03-01', '2026-02-28')
+    db.prepare(`INSERT INTO rent_contracts (id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, paymentCycle, startDate, endDate, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
+      .run(c1id, p1id, '示例房源-A', '李明', '13812345678', 3500, 'quarterly', '2025-01-01', '2025-12-31', now)
+    db.prepare(`INSERT INTO rent_contracts (id, propertyId, propertyName, tenantName, tenantPhone, rentAmount, paymentCycle, startDate, endDate, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
+      .run(c2id, p2id, '示例房源-B', '王芳', '13987654321', 4200, 'monthly', '2025-03-01', '2026-02-28', now)
+    generateBills(db, c1id, p1id, '示例房源-A', '李明', 3500, 'quarterly', '2025-01-01', '2025-12-31')
+    generateBills(db, c2id, p2id, '示例房源-B', '王芳', 4200, 'monthly', '2025-03-01', '2026-02-28')
     ok(res, { msg: 'sample data created' })
   } catch (e) { fail(res, 500, e.message) }
 })
 
 // ── Bill generation helper ──────────────────────────────────
-function generateBills(db, contractId, propertyId, propertyName, tenantName, rentAmount, depositAmount, paymentCycle, startDate, endDate) {
+function generateBills(db, contractId, propertyId, propertyName, tenantName, rentAmount, paymentCycle, startDate, endDate) {
   const intervalMonths = paymentCycle === 'monthly' ? 1 : paymentCycle === 'quarterly' ? 3 : paymentCycle === 'half_year' ? 6 : 12
+  const billAmount = rentAmount * intervalMonths  // 账单金额 = 月租金 × 周期月数
   const start = new Date(startDate)
   const end = new Date(endDate)
   let cur = new Date(start)
@@ -568,17 +485,18 @@ function generateBills(db, contractId, propertyId, propertyName, tenantName, ren
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
       const createdAt = new Date().toISOString()
       db.prepare(`INSERT INTO rent_bills (id, contractId, propertyId, tenantName, propertyName, dueDate, amount, type, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'rent', 'pending', ?)`)
-        .run(id, contractId, propertyId, tenantName, propertyName, dueStr, rentAmount, createdAt)
+        .run(id, contractId, propertyId, tenantName, propertyName, dueStr, billAmount, createdAt)
     }
     cur.setMonth(cur.getMonth() + intervalMonths)
-  }
-  if (depositAmount > 0) {
-    const exists = db.prepare('SELECT id FROM rent_bills WHERE contractId=? AND type=?').get(contractId, 'deposit')
-    if (!exists) {
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
-      const createdAt = new Date().toISOString()
-      db.prepare(`INSERT INTO rent_bills (id, contractId, propertyId, tenantName, propertyName, dueDate, amount, type, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'deposit', 'pending', ?)`)
-        .run(id, contractId, propertyId, tenantName, propertyName, startDate, depositAmount, createdAt)
+    if (cur > end) {
+      // 最后一期超出合同结束时，在合同结束日补生成一次
+      if (!db.prepare('SELECT id FROM rent_bills WHERE contractId=? AND dueDate=? AND type=?').get(contractId, endDate, 'rent')) {
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+        const createdAt = new Date().toISOString()
+        db.prepare(`INSERT INTO rent_bills (id, contractId, propertyId, tenantName, propertyName, dueDate, amount, type, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'rent', 'pending', ?)`)
+          .run(id, contractId, propertyId, tenantName, propertyName, endDate, billAmount, createdAt)
+      }
+      break
     }
   }
 }

@@ -2,6 +2,7 @@
 const emit = defineEmits(['change-tab', 'logout', 'open-admin'])
 import { ref, onMounted, computed } from 'vue'
 import { getStats, getBills, getContracts, getDeposits, getProperties, payBill } from '../store.js'
+import PayModal from '../components/PayModal.vue'
 
 const stats = ref({})
 const bills = ref([])
@@ -9,6 +10,8 @@ const contracts = ref([])
 const deposits = ref([])
 const properties = ref([])
 const showBillsModal = ref(false)
+const showPayModal = ref(false)
+const selectedBill = ref(null)
 const toast = ref('')
 const loading = ref(true)
 
@@ -39,14 +42,21 @@ function openBills() {
   showBillsModal.value = true
 }
 
-async function payBillById(id) {
+function openPay(bill) {
+  selectedBill.value = bill
+  showPayModal.value = true
+}
+
+async function confirmPay({ receivedAmount, paidDate }) {
   try {
-    await payBill(id)
+    await payBill(selectedBill.value.id, { receivedAmount, paidDate })
     const [newBills, newStats] = await Promise.all([getBills(), getStats()])
     bills.value = newBills
     stats.value = newStats
     pendingBills.value = [...newBills].sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-    showToast('已标记为已付')
+    showPayModal.value = false
+    showToast('收款成功 ✓')
+    selectedBill.value = null
   } catch(e) {
     console.error(e)
     showToast('操作失败')
@@ -180,7 +190,7 @@ const pendingCount = computed(() => bills.value.filter(b => b.status === 'pendin
               class="badge"
               :class="bill.status==='paid' ? 'badge-success' : 'badge-warning'"
               style="cursor:pointer"
-              @click="bill.status!=='paid' && payBillById(bill.id)"
+              @click="bill.status!=='paid' && openPay(bill)"
             >{{ bill.status === 'paid' ? '已付 ✓' : '待付 ⟶' }}</span>
           </div>
         </div>
@@ -188,6 +198,14 @@ const pendingCount = computed(() => bills.value.filter(b => b.status === 'pendin
         <button class="btn btn-secondary" style="margin-top:16px" @click="showBillsModal=false">关闭</button>
       </div>
     </div>
+
+    <PayModal
+      v-if="showPayModal"
+      :bill="selectedBill"
+      :isEdit="(selectedBill.receivedAmount || 0) > 0"
+      @close="showPayModal = false"
+      @confirm="confirmPay"
+    />
 
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>

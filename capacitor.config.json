@@ -1,9 +1,5 @@
 {
   "appId": "com.rentreminder.app",
   "appName": "收租提醒",
-  "webDir": "dist",
-  "server": {
-    "url": "http://1.14.45.222:3310",
-    "hostname": "rent-reminder"
-  }
+  "webDir": "dist"
 }

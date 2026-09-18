@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getStats, getBills, getContracts, payBill, getProperties } from '../store.js'
+import PayModal from '../components/PayModal.vue'
 
 const emit = defineEmits(['change-tab'])
 
@@ -30,17 +31,17 @@ onMounted(async () => {
   }
 })
 
-async function confirmPay() {
+async function confirmPay({ receivedAmount, paidDate }) {
   if (!selectedBill.value) return
-  const billId = selectedBill.value.id
   try {
-    await payBill(billId)
+    await payBill(selectedBill.value.id, { receivedAmount, paidDate })
     showPayModal.value = false
-    selectedBill.value = null
-    const [newStats, newBills] = await Promise.all([getStats(), getBills()])
-    stats.value = newStats
-    bills.value = newBills
     showToast('收款成功 ✓')
+    selectedBill.value = null
+    const [s, b, c] = await Promise.all([getStats(), getBills(), getContracts()])
+    stats.value = s
+    bills.value = b
+    contracts.value = c
   } catch(e) {
     console.error(e)
     showToast('操作失败')
@@ -48,10 +49,14 @@ async function confirmPay() {
 }
 
 const sortedBills = computed(() => {
+  const now = new Date()
+  const yyyy = now.getFullYear()
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const thisMonth = `${yyyy}-${mm}`
   return [...bills.value]
-    .filter(b => b.status === 'pending')
+    .filter(b => b.status === 'pending' && b.dueDate.slice(0, 7) === thisMonth)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-    .slice(0, 5)
+    .slice(0, 8)
 })
 
 function openPay(bill) {
@@ -128,7 +133,7 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
         <div class="stat-card green">
           <div class="stat-value default">{{ stats.pendingCount }}</div>
           <div class="stat-label">待收笔数</div>
-          <div class="stat-sub">共 {{ bills.length }} 条账单</div>
+          <div class="stat-sub">共 {{ bills.filter(b => b.status === 'pending').length }} 条待收</div>
         </div>
         <div class="stat-card" :class="hasOverdue ? 'danger' : 'green'">
           <div class="stat-value">{{ stats.overdueCount }}</div>
@@ -184,7 +189,7 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
     </template>
 
     <!-- Bills section -->
-    <div class="section-title">📅 待办账单</div>
+    <div class="section-title">📅 本月待办账单</div>
 
     <template v-if="loading">
       <div v-for="i in 3" :key="i" class="bill-card skeleton-card">
@@ -196,7 +201,7 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
     <template v-else-if="sortedBills.length === 0">
       <div class="empty">
         <div class="empty-icon">🎉</div>
-        <div class="empty-text">太棒了！暂无待办账单</div>
+        <div class="empty-text">🎉 太棒了！暂无待办账单</div>
         <div class="empty-sub">所有账单均已结清</div>
       </div>
     </template>
@@ -229,7 +234,14 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
         </div>
         <!-- Right: amount + action -->
         <div class="bill-right">
-          <div class="bill-amount">¥{{ formatAmount(bill.amount) }}</div>
+          <div class="bill-amount">
+            <span v-if="(bill.receivedAmount || 0) > 0" class="received-hint">
+              <span>已收¥{{ bill.receivedAmount.toLocaleString() }}</span>
+              <span style="margin:0 4px;color:var(--border)">|</span>
+              <span style="color:var(--accent)">待收¥{{ (bill.amount - bill.receivedAmount).toLocaleString() }}</span>
+            </span>
+            <span v-else>¥{{ formatAmount(bill.amount) }}</span>
+          </div>
           <div class="bill-action">
             <span class="pay-btn">收款 ✓</span>
           </div>
@@ -238,50 +250,18 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
 
       <!-- View all -->
       <button class="btn btn-secondary btn-view-all" @click="emit('change-tab')">
-        <span>查看全部 {{ bills.filter(b => b.status === 'pending').length }} 条账单</span>
+        <span>查看全部 {{ bills.filter(b => b.status === 'pending').length }} 条待办</span>
         <span class="arrow">→</span>
       </button>
     </template>
 
-    <!-- Payment modal -->
-    <div v-if="showPayModal" class="modal-overlay" @click.self="showPayModal=false">
-      <div class="modal-sheet">
-        <div class="modal-title">💰 确认收款</div>
-        <div class="modal-subtitle">请确认以下账单已完成付款</div>
-
-        <div v-if="selectedBill" class="pay-detail-card">
-          <div class="pay-detail-row">
-            <span class="pay-detail-label">租客</span>
-            <span class="pay-detail-value">{{ selectedBill.tenantName }}</span>
-          </div>
-          <div class="pay-detail-row">
-            <span class="pay-detail-label">房源</span>
-            <span class="pay-detail-value text-muted">{{ selectedBill.propertyName }}</span>
-          </div>
-          <div class="pay-detail-row">
-            <span class="pay-detail-label">类型</span>
-            <span class="bill-type-tag" :class="selectedBill.type === 'deposit' ? 'tag-purple' : ''" style="font-size:11px">
-              {{ selectedBill.type === 'deposit' ? '质保金' : '租金' }}
-            </span>
-          </div>
-          <div class="pay-detail-row">
-            <span class="pay-detail-label">到期日</span>
-            <span class="pay-detail-value">{{ selectedBill.dueDate }}</span>
-          </div>
-          <div class="pay-detail-amount">
-            <span class="pay-amount-label">收款金额</span>
-            <span class="pay-amount-val">¥{{ formatAmount(selectedBill.amount) }}</span>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showPayModal=false">取消</button>
-          <button class="btn btn-primary" @click="confirmPay">
-            <span>✓ 确认收款</span>
-          </button>
-        </div>
-      </div>
-    </div>
+    <PayModal
+      v-if="showPayModal"
+      :bill="selectedBill"
+      :isEdit="(selectedBill.receivedAmount || 0) > 0"
+      @close="showPayModal = false"
+      @confirm="confirmPay"
+    />
 
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
@@ -459,7 +439,9 @@ const hasUrgent = computed(() => sortedBills.value.some(b => daysUntil(b.dueDate
 
 .bill-right { text-align: right; flex-shrink: 0; margin-left: 12px; }
 .bill-amount { font-size: 18px; font-weight: 800; color: var(--accent); letter-spacing: -0.3px; }
-.bill-action { margin-top: 4px; }
+.received-hint { color: var(--text-muted); font-weight: 600; font-size: 14px; }
+.remaining-hint { font-size: 12px; color: var(--warning); font-weight: 600; margin-top: 8px; text-align: center; }
+.bill-action { margin-top: 4px; flex-shrink: 0; }
 .pay-btn {
   font-size: 11px;
   font-weight: 700;

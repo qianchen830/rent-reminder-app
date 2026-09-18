@@ -17,6 +17,8 @@ const authExpired = ref(false)
 window.addEventListener('rent-auth-expired', () => {
   authExpired.value = true
   onLogout()
+  // 清空 authExpired，下次正常显示 LoginPage
+  setTimeout(() => { authExpired.value = false }, 50)
 })
 
 function onLoginSuccess(data) {
@@ -40,13 +42,8 @@ const tabs = [
 </script>
 
 <template>
-  <!-- Auth expired notice -->
-  <div v-if="authExpired" style="text-align:center;padding:20px;color:#e74c3c;font-size:14px">
-    登录已过期，请重新登录
-  </div>
-
   <!-- Not logged in -->
-  <LoginPage v-else-if="!user" @login-success="onLoginSuccess" />
+  <LoginPage v-if="!user" @login-success="onLoginSuccess" />
 
   <!-- Admin panel -->
   <AdminPage v-else-if="showAdmin" @back="showAdmin = false" :user="user" @logout="onLogout" />

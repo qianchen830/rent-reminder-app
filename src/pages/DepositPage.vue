@@ -304,8 +304,7 @@ function statusBadge(s) {
   display: flex;
   gap: 8px;
   margin-bottom: 18px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
   flex-wrap: nowrap;
   min-width: 0;
 }
