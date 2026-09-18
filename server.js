@@ -9,7 +9,7 @@ import bcrypt from 'bcryptjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
-const PORT = 3002
+const PORT = 3005
 const JWT_SECRET = 'rent-reminder-secret-2026'
 const JWT_EXPIRES = '7d'
 
