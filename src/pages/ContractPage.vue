@@ -454,7 +454,7 @@ function statusBadge(c) {
                 ¥{{ bill.amount.toLocaleString() }}
               </div>
             </div>
-            <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
+            <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end;flex-shrink:0;margin-top:4px">
               <span
                 class="badge"
                 :class="bill.status!=='paid' ? 'badge-warning' : 'badge-success'"
@@ -699,6 +699,6 @@ function statusBadge(c) {
 .bill-item:hover { border-color: var(--border-accent); }
 .bill-item-left { display: flex; flex-direction: column; gap: 4px; }
 .bill-item-date { font-size: 12px; color: var(--text-muted); }
-.bill-item-right { text-align: right; }
+.bill-item-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
 .bill-item-amount { font-size: 17px; font-weight: 800; color: var(--accent); margin-bottom: 4px; }
 </style>

@@ -7,8 +7,16 @@ export function getUser() { try { return JSON.parse(localStorage.getItem('rent_u
 export function setUser(u) { if (u) localStorage.setItem('rent_user', JSON.stringify(u)); else localStorage.removeItem('rent_user') }
 export function logout() { setToken(''); setUser(null) }
 
+function checkAuth(r, path) {
+  if (r.status === 401 && path !== '/auth/login') {
+    window.dispatchEvent(new Event('rent-auth-expired'))
+    throw new Error('登录已过期，请重新登录')
+  }
+}
+
 async function get(path) {
   const r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + _token } })
+  checkAuth(r, path)
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data
@@ -19,12 +27,14 @@ async function post(path, body = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + _token },
     body: JSON.stringify(body)
   })
+  checkAuth(r, path)
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data
 }
 async function del(path) {
   const r = await fetch(API + path, { method: 'DELETE', headers: { Authorization: 'Bearer ' + _token } })
+  checkAuth(r, path)
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data
@@ -35,6 +45,7 @@ async function put(path, body = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + _token },
     body: JSON.stringify(body)
   })
+  checkAuth(r, path)
   const d = await r.json()
   if (!d.success) throw new Error(d.error || 'API error')
   return d.data

@@ -9,7 +9,7 @@ import bcrypt from 'bcryptjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
-const PORT = 3005
+const PORT = process.env.PORT || 3002
 const JWT_SECRET = 'rent-reminder-secret-2026'
 const JWT_EXPIRES = '7d'
 
@@ -256,20 +256,36 @@ app.post('/api/contracts/:id', auth, (req, res) => {
     if (!existing) return fail(res, 404, 'Contract not found')
     const { propertyId, propertyName, tenantName, tenantPhone, rentAmount,
             paymentCycle, startDate, endDate, status } = req.body
+    const v = {
+      propertyId: propertyId ?? existing.propertyId,
+      propertyName: propertyName ?? existing.propertyName,
+      tenantName: tenantName ?? existing.tenantName,
+      tenantPhone: tenantPhone ?? existing.tenantPhone,
+      rentAmount: rentAmount ?? existing.rentAmount,
+      paymentCycle: paymentCycle ?? existing.paymentCycle,
+      startDate: startDate ?? existing.startDate,
+      endDate: endDate ?? existing.endDate,
+      status: status ?? existing.status,
+    }
     db.prepare(`UPDATE rent_contracts SET propertyId=?, propertyName=?, tenantName=?, tenantPhone=?,
       rentAmount=?, paymentCycle=?, startDate=?, endDate=?, status=? WHERE id=?`)
-      .run(
-        propertyId ?? existing.propertyId,
-        propertyName ?? existing.propertyName,
-        tenantName ?? existing.tenantName,
-        tenantPhone ?? existing.tenantPhone,
-        rentAmount ?? existing.rentAmount,
-        paymentCycle ?? existing.paymentCycle,
-        startDate ?? existing.startDate,
-        endDate ?? existing.endDate,
-        status ?? existing.status,
-        req.params.id
-      )
+      .run(v.propertyId, v.propertyName, v.tenantName, v.tenantPhone,
+           v.rentAmount, v.paymentCycle, v.startDate, v.endDate, v.status, req.params.id)
+
+    // 账期/租金等变化时重建账单：已付和有实收记录的账单保持不变，只重排后续待付账单
+    const changed = ['propertyId','propertyName','tenantName','rentAmount','paymentCycle','startDate','endDate']
+      .some(k => v[k] !== existing[k])
+    if (changed) {
+      // 同步显示信息到全部账单（不影响收款记录）
+      db.prepare('UPDATE rent_bills SET propertyId=?, propertyName=?, tenantName=? WHERE contractId=?')
+        .run(v.propertyId, v.propertyName, v.tenantName, req.params.id)
+      // 删除无实收记录的待付账单，已付/部分实收的保留
+      db.prepare("DELETE FROM rent_bills WHERE contractId=? AND status='pending' AND (receivedAmount IS NULL OR receivedAmount=0)")
+        .run(req.params.id)
+      // 按新账期重新生成（generateBills 会跳过已存在 dueDate 的账单）
+      generateBills(db, req.params.id, v.propertyId, v.propertyName, v.tenantName, v.rentAmount, v.paymentCycle, v.startDate, v.endDate)
+    }
+
     ok(res, db.prepare('SELECT * FROM rent_contracts WHERE id=?').get(req.params.id))
   } catch (e) { fail(res, 500, e.message) }
 })

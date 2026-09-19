@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage.vue'
 import PropertyPage from './pages/PropertyPage.vue'
 import ContractPage from './pages/ContractPage.vue'
 import DepositPage from './pages/DepositPage.vue'
+import DashboardPage from './pages/DashboardPage.vue'
 import ProfilePage from './pages/ProfilePage.vue'
 import LoginPage from './pages/LoginPage.vue'
 import AdminPage from './pages/AdminPage.vue'
@@ -17,7 +18,6 @@ const authExpired = ref(false)
 window.addEventListener('rent-auth-expired', () => {
   authExpired.value = true
   onLogout()
-  // 清空 authExpired，下次正常显示 LoginPage
   setTimeout(() => { authExpired.value = false }, 50)
 })
 
@@ -37,6 +37,7 @@ const tabs = [
   { key: 'property', label: '房源', icon: '🏢' },
   { key: 'contract', label: '合同', icon: '📋' },
   { key: 'deposit', label: '质保金', icon: '🔐' },
+  { key: 'dashboard', label: '看板', icon: '📊' },
   { key: 'profile', label: '我的', icon: '👤' },
 ]
 </script>
@@ -55,6 +56,7 @@ const tabs = [
       <PropertyPage v-if="currentTab === 'property'" />
       <ContractPage v-if="currentTab === 'contract'" />
       <DepositPage v-if="currentTab === 'deposit'" />
+      <DashboardPage v-if="currentTab === 'dashboard'" />
       <ProfilePage v-if="currentTab === 'profile'" @logout="onLogout" @open-admin="showAdmin = true" />
     </div>
     <nav class="tab-bar">
