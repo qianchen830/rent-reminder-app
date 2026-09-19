@@ -279,11 +279,27 @@ app.post('/api/contracts/:id', auth, (req, res) => {
       // 同步显示信息到全部账单（不影响收款记录）
       db.prepare('UPDATE rent_bills SET propertyId=?, propertyName=?, tenantName=? WHERE contractId=?')
         .run(v.propertyId, v.propertyName, v.tenantName, req.params.id)
-      // 删除无实收记录的待付账单，已付/部分实收的保留
-      db.prepare("DELETE FROM rent_bills WHERE contractId=? AND status='pending' AND (receivedAmount IS NULL OR receivedAmount=0)")
-        .run(req.params.id)
-      // 按新账期重新生成（generateBills 会跳过已存在 dueDate 的账单）
-      generateBills(db, req.params.id, v.propertyId, v.propertyName, v.tenantName, v.rentAmount, v.paymentCycle, v.startDate, v.endDate)
+
+      const oldInterval = existing.paymentCycle === 'monthly' ? 1 : existing.paymentCycle === 'quarterly' ? 3 : existing.paymentCycle === 'half_year' ? 6 : 12
+
+      // 已付/有实收记录的账单一律保留；新账单从最后一笔已付账单的下一期开始排
+      // 锚定周期优先用已付账单金额÷新月租反推（防止来回改账期后错位）
+      const lastKept = db.prepare("SELECT dueDate d, amount a FROM rent_bills WHERE contractId=? AND (status='paid' OR (receivedAmount IS NOT NULL AND receivedAmount>0)) ORDER BY dueDate DESC LIMIT 1").get(req.params.id)
+      let firstDate = v.startDate
+      if (lastKept && lastKept.d) {
+        const ratio = (v.rentAmount > 0 && lastKept.a > 0) ? Math.round(lastKept.a / v.rentAmount) : 0
+        const anchor = (ratio >= 1 && ratio <= 12) ? ratio : oldInterval
+        const dt = new Date(lastKept.d)
+        dt.setMonth(dt.getMonth() + anchor)
+        firstDate = dt.toISOString().slice(0, 10)
+      }
+
+      // 只重排 firstDate 之后的未付账单
+      db.prepare("DELETE FROM rent_bills WHERE contractId=? AND status='pending' AND (receivedAmount IS NULL OR receivedAmount=0) AND dueDate>=?")
+        .run(req.params.id, firstDate)
+
+      // 从 firstDate 起按新账期生成（generateBills 会跳过已存在 dueDate 的账单）
+      generateBills(db, req.params.id, v.propertyId, v.propertyName, v.tenantName, v.rentAmount, v.paymentCycle, firstDate, v.endDate)
     }
 
     ok(res, db.prepare('SELECT * FROM rent_contracts WHERE id=?').get(req.params.id))
@@ -355,6 +371,13 @@ app.post('/api/bills/:id/unpay', auth, (req, res) => {
 })
 
 // ── Deposits ──────────────────────────────────
+app.delete('/api/bills/:id', auth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rent_bills WHERE id=?').run(req.params.id)
+    ok(res, { deleted: true })
+  } catch (e) { fail(res, 500, e.message) }
+})
+
 app.get('/api/deposits', auth, (req, res) => {
   try {
     ok(res, db.prepare('SELECT * FROM rent_deposits ORDER BY createdAt DESC').all())

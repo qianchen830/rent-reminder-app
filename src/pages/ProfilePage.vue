@@ -1,7 +1,13 @@
 <script setup>
 const emit = defineEmits(['change-tab', 'logout', 'open-admin'])
 import { ref, onMounted, computed } from 'vue'
-import { getStats, getBills, getContracts, getDeposits, getProperties, payBill } from '../store.js'
+import { getStats, getBills, getContracts, getDeposits, getProperties, payBill, deleteBill } from '../store.js'
+
+const sortBills = (arr) => [...arr].sort((a, b) => {
+  const aPaid = a.status === 'paid', bPaid = b.status === 'paid'
+  if (aPaid !== bPaid) return aPaid ? 1 : -1
+  return a.dueDate.localeCompare(b.dueDate)
+})
 import PayModal from '../components/PayModal.vue'
 
 const stats = ref({})
@@ -38,7 +44,7 @@ async function refresh() {
 const pendingBills = ref([])
 
 function openBills() {
-  pendingBills.value = [...bills.value].sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+  pendingBills.value = sortBills(bills.value)
   showBillsModal.value = true
 }
 
@@ -53,13 +59,28 @@ async function confirmPay({ receivedAmount, paidDate }) {
     const [newBills, newStats] = await Promise.all([getBills(), getStats()])
     bills.value = newBills
     stats.value = newStats
-    pendingBills.value = [...newBills].sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    pendingBills.value = sortBills(newBills)
     showPayModal.value = false
     showToast('收款成功 ✓')
     selectedBill.value = null
   } catch(e) {
     console.error(e)
     showToast('操作失败')
+  }
+}
+
+async function delBill(billId) {
+  if (!confirm('确认删除这条账单？删除后不可恢复。')) return
+  try {
+    await deleteBill(billId)
+    const [newBills, newStats] = await Promise.all([getBills(), getStats()])
+    bills.value = newBills
+    stats.value = newStats
+    pendingBills.value = sortBills(newBills)
+    showToast('已删除')
+  } catch(e) {
+    console.error(e)
+    showToast('删除失败')
   }
 }
 
@@ -186,12 +207,19 @@ const pendingCount = computed(() => bills.value.filter(b => b.status === 'pendin
           </div>
           <div class="bills-modal-right">
             <div class="bills-modal-amount">¥{{ bill.amount.toLocaleString() }}</div>
-            <span
-              class="badge"
-              :class="bill.status==='paid' ? 'badge-success' : 'badge-warning'"
-              style="cursor:pointer"
-              @click="bill.status!=='paid' && openPay(bill)"
-            >{{ bill.status === 'paid' ? '已付 ✓' : '待付 ⟶' }}</span>
+            <div style="display:flex;gap:4px;justify-content:flex-end;align-items:center;margin-top:4px">
+              <span
+                class="badge"
+                :class="bill.status==='paid' ? 'badge-success' : 'badge-warning'"
+                style="cursor:pointer"
+                @click="bill.status!=='paid' && openPay(bill)"
+              >{{ bill.status === 'paid' ? '已付 ✓' : '待付 ⟶' }}</span>
+              <span
+                class="badge badge-danger"
+                style="cursor:pointer"
+                @click="delBill(bill.id)"
+              >删</span>
+            </div>
           </div>
         </div>
 

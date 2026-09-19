@@ -3,7 +3,7 @@ console.log("CONTRACT_PAGE_LOADED_MAGIC")
 import { ref, computed, onMounted } from 'vue'
 import {
   getContracts, getProperties, getBills, addContract, updateContract,
-  deleteContract, payBill, unpayBill, endContract, cycleText
+  deleteContract, payBill, unpayBill, deleteBill, endContract, cycleText
 } from '../store.js'
 import PayModal from '../components/PayModal.vue'
 
@@ -46,7 +46,11 @@ const displayed = computed(() => contracts.value.filter(c => c.status === tab.va
 const contractBills = computed(() => {
   if (!selectedContract.value) return []
   return bills.value.filter(b => b.contractId === selectedContract.value.id)
-    .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+    .sort((a, b) => {
+      const aPaid = a.status === 'paid', bPaid = b.status === 'paid'
+      if (aPaid !== bPaid) return aPaid ? 1 : -1   // 未付在前
+      return a.dueDate.localeCompare(b.dueDate)     // 按到期日从前到后
+    })
 })
 
 function formDefaults() {
@@ -186,6 +190,18 @@ async function unpay(billId) {
   } catch(e) {
     console.error(e)
     showToast('操作失败')
+  }
+}
+
+async function delBill(billId) {
+  if (!confirm('确认删除这条账单？删除后不可恢复。')) return
+  try {
+    await deleteBill(billId)
+    bills.value = await getBills()
+    showToast('已删除')
+  } catch(e) {
+    console.error(e)
+    showToast('删除失败')
   }
 }
 
@@ -461,6 +477,11 @@ function statusBadge(c) {
                 style="cursor:pointer"
                 @click="pay(bill.id)"
               >{{ bill.status!=='paid' ? '待付 ⟶' : '已付 ✓' }}</span>
+              <span
+                class="badge badge-danger"
+                style="cursor:pointer"
+                @click="delBill(bill.id)"
+              >删</span>
             </div>
           </div>
         </div>

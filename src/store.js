@@ -89,6 +89,7 @@ export async function getBills() { return await get('/bills') }
 export async function addBill(data) { return await post('/bills', data) }
 export async function payBill(id, { receivedAmount, amount, paidDate } = {}) { return await post(`/bills/${id}/pay`, { receivedAmount, amount, paidDate }) }
 export async function unpayBill(id) { return await post(`/bills/${id}/unpay`, {}) }
+export async function deleteBill(id) { return await del(`/bills/${id}`) }
 
 // Stats
 export async function getStats() { return await get('/stats') }
